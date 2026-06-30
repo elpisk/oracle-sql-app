@@ -837,9 +837,235 @@ WHERE  last_name LIKE '%s%'
 ORDER  BY last_name;` },
 ]
 
+const CH03_SECTIONS = [
+  { title: '1. 단일행 함수 개요', content: `단일행 함수(Single-Row Function)는 행마다 하나의 결과를 반환합니다.
+
+**단일행 함수 분류**
+| 유형 | Oracle 대표 함수 |
+|------|----------------|
+| 문자 | UPPER, LOWER, INITCAP, SUBSTR, LENGTH, INSTR, LPAD, RPAD, TRIM, REPLACE |
+| 숫자 | ROUND, TRUNC, MOD |
+| 날짜 | SYSDATE, MONTHS_BETWEEN, ADD_MONTHS, NEXT_DAY, LAST_DAY |
+| 변환 | TO_CHAR, TO_NUMBER, TO_DATE |
+| 일반 | NVL, NVL2, NULLIF, COALESCE, DECODE, CASE |
+
+**특징**
+- 각 행에 독립적으로 적용
+- 중첩 사용 가능: UPPER(SUBSTR(col, 1, 3))
+- SELECT, WHERE, ORDER BY 절 모두 사용 가능`, code: `-- 함수 중첩 예제
+SELECT employee_id,
+       UPPER(SUBSTR(last_name, 1,3)) AS name_code,
+       ROUND(salary / 12, 2)         AS monthly_sal
+FROM   employees
+WHERE  ROWNUM <= 5;` },
+
+  { title: '2. 문자 함수', content: `Oracle 문자 함수로 문자열을 변환·추출·검색합니다.
+
+**대소문자 변환**
+| 함수 | 역할 | MySQL 대응 |
+|------|------|-----------|
+| UPPER(s) | 대문자 변환 | UPPER() |
+| LOWER(s) | 소문자 변환 | LOWER() |
+| INITCAP(s) | 단어 첫 글자만 대문자 | 없음 (Oracle 전용) |
+
+**추출·검색**
+| 함수 | 역할 |
+|------|------|
+| SUBSTR(s, pos, len) | 부분 문자열 추출 (1-base) |
+| LENGTH(s) | 문자열 길이 |
+| INSTR(s, sub, pos, occ) | 부분 문자열 위치 |
+
+**변환·채우기**
+| 함수 | 역할 |
+|------|------|
+| LPAD(s, n, c) | 왼쪽 채우기 |
+| RPAD(s, n, c) | 오른쪽 채우기 |
+| TRIM(c FROM s) | 양쪽 문자 제거 |
+| REPLACE(s, old, new) | 문자열 교체 |`, code: `-- 대소문자 변환
+SELECT UPPER('oracle'), LOWER('SQL'), INITCAP('hello world')
+FROM   dual;
+-- ORACLE, sql, Hello World
+
+-- 부분 문자열 추출
+SELECT SUBSTR('Hello World', 7)     AS from7,    -- World
+       SUBSTR('Hello World', 7, 3)  AS three_ch   -- Wor
+FROM   dual;
+
+-- LPAD로 보고서 정렬
+SELECT LPAD(salary, 10, ' ') AS salary_fmt
+FROM   employees WHERE ROWNUM <= 3;` },
+
+  { title: '3. 숫자 함수', content: `Oracle 숫자 함수로 반올림, 버림, 나머지를 계산합니다.
+
+**주요 숫자 함수**
+| 함수 | 역할 | 예시 |
+|------|------|------|
+| ROUND(n, d) | d자리로 반올림 | ROUND(45.926,2)=45.93 |
+| TRUNC(n, d) | d자리에서 버림 | TRUNC(45.926,2)=45.92 |
+| MOD(m, n) | m÷n 나머지 | MOD(1600,300)=100 |
+
+**ROUND / TRUNC 음수 자리수**
+- ROUND(45.926, 0) = 46 (정수 반올림)
+- ROUND(45.926, -1) = 50 (십의 자리 반올림)
+- ROUND(45.926, -2) = 0 (백의 자리 반올림)
+
+**MOD 활용**
+- 짝수/홀수 판별: MOD(n, 2) = 0 이면 짝수
+- 배수 판별: MOD(n, 5) = 0 이면 5의 배수`, code: `-- 기본 숫자 함수
+SELECT ROUND(45.926, 2)  AS r_2,    -- 45.93
+       ROUND(45.926, 0)  AS r_0,    -- 46
+       ROUND(45.926, -1) AS r_m1,   -- 50
+       TRUNC(45.926, 2)  AS t_2,    -- 45.92
+       MOD(1600, 300)    AS mod_val  -- 100
+FROM   dual;
+
+-- 커미션 계산 (반올림)
+SELECT last_name, salary, commission_pct,
+       ROUND(salary * NVL(commission_pct, 0), 0) AS commission
+FROM   employees WHERE commission_pct IS NOT NULL AND ROWNUM <= 5;` },
+
+  { title: '4. 날짜 함수 (Oracle 전용)', content: `Oracle 날짜 함수는 MySQL과 큰 차이가 있습니다.
+
+**Oracle 날짜 산술**
+- DATE + NUMBER = DATE (날짜에 일 수 더하기)
+- DATE - DATE = NUMBER (두 날짜 사이의 일 수)
+
+**Oracle 전용 날짜 함수**
+| 함수 | 역할 | MySQL 대응 |
+|------|------|-----------|
+| SYSDATE | 현재 날짜+시간 | NOW() |
+| MONTHS_BETWEEN(d1,d2) | 두 날짜 사이 월 수 | PERIOD_DIFF() |
+| ADD_MONTHS(d, n) | n개월 더하기 | DATE_ADD(d, INTERVAL n MONTH) |
+| NEXT_DAY(d, day) | 다음 해당 요일 날짜 | 없음 |
+| LAST_DAY(d) | 해당 월 마지막 날 | LAST_DAY() |
+| TRUNC(date) | 날짜 시간 부분 제거 | DATE() |`, code: `-- Oracle 날짜 산술
+SELECT SYSDATE,
+       SYSDATE + 7                AS next_week,
+       SYSDATE - 7                AS last_week,
+       TRUNC(SYSDATE)             AS today_midnight
+FROM   dual;
+
+-- Oracle 전용 날짜 함수
+SELECT hire_date,
+       MONTHS_BETWEEN(SYSDATE, hire_date)   AS months,
+       ADD_MONTHS(hire_date, 3)             AS plus3m,
+       LAST_DAY(hire_date)                  AS last_of_month,
+       NEXT_DAY(hire_date, 'FRIDAY')        AS next_fri
+FROM   employees WHERE ROWNUM <= 3;` },
+
+  { title: '5. 변환 함수 (TO_CHAR, TO_NUMBER, TO_DATE)', content: `Oracle 변환 함수는 데이터 타입 간 변환을 명시적으로 수행합니다.
+
+**TO_CHAR — 날짜/숫자 → 문자열**
+\`\`\`sql
+TO_CHAR(date, format)    -- 날짜를 문자열로
+TO_CHAR(number, format)  -- 숫자를 문자열로
+\`\`\`
+| 형식 요소 | 의미 |
+|-----------|------|
+| YYYY | 4자리 연도 |
+| MM | 2자리 월 |
+| DD | 2자리 일 |
+| HH24:MI:SS | 시간 |
+| DY | 요일 약어 (MON) |
+| Day | 요일 전체 (Monday) |
+| 9 | 숫자 자리 |
+| , | 천단위 구분 |
+| $ | 달러 기호 |
+| FM | 선행 공백 제거 |
+
+**TO_DATE — 문자열 → 날짜**
+\`\`\`sql
+TO_DATE('2024-01-15', 'YYYY-MM-DD')
+\`\`\`
+
+**TO_NUMBER — 문자열 → 숫자**
+\`\`\`sql
+TO_NUMBER('12,345.67', '99,999.99')
+\`\`\``, code: `-- TO_CHAR: 날짜 형식
+SELECT TO_CHAR(hire_date, 'YYYY-MM-DD')          AS date1,
+       TO_CHAR(hire_date, 'Day DD Month YYYY')    AS date2
+FROM   employees WHERE ROWNUM <= 2;
+
+-- TO_CHAR: 숫자 형식
+SELECT TO_CHAR(salary, 'FM$999,999')  AS sal_fmt
+FROM   employees WHERE ROWNUM <= 3;
+
+-- TO_DATE: 문자 → 날짜
+SELECT TO_DATE('2024-12-25', 'YYYY-MM-DD') AS christmas
+FROM   dual;` },
+
+  { title: '6. 일반 함수와 DECODE / CASE', content: `NULL 처리 함수와 조건 표현식입니다.
+
+**NULL 처리 함수**
+| 함수 | 역할 | MySQL 대응 |
+|------|------|-----------|
+| NVL(e, d) | NULL이면 d 반환 | IFNULL() |
+| NVL2(e, a, b) | NULL 아니면 a, NULL이면 b | IF(e IS NOT NULL, a, b) |
+| NULLIF(e1, e2) | e1=e2이면 NULL, 아니면 e1 | NULLIF() |
+| COALESCE(v1,...) | 첫 번째 NOT NULL 반환 | COALESCE() |
+
+**DECODE — Oracle 전용 IF-THEN-ELSE**
+\`\`\`sql
+DECODE(expr, s1,r1, s2,r2, ..., default)
+-- MySQL에는 없는 Oracle 고유 함수
+\`\`\`
+
+**CASE — SQL 표준 조건 표현식**
+\`\`\`sql
+-- 단순 CASE (등치)
+CASE expr WHEN val THEN result ... ELSE d END
+-- 검색 CASE (임의 조건)
+CASE WHEN cond THEN result ... ELSE d END
+\`\`\``, code: `-- NVL2: NULL 여부에 따른 다른 값
+SELECT last_name,
+       NVL2(commission_pct, '커미션 있음', '커미션 없음') AS comm_status
+FROM   employees WHERE ROWNUM <= 5;
+
+-- DECODE: job_id별 급여 인상률 (Oracle 전용)
+SELECT last_name, job_id,
+       DECODE(job_id, 'IT_PROG', salary*1.1,
+                      'SA_REP',  salary*1.2,
+                                 salary*1.05) AS new_sal
+FROM   employees WHERE ROWNUM <= 5;
+
+-- CASE: 급여 구간별 등급
+SELECT last_name, salary,
+       CASE WHEN salary >= 10000 THEN '상'
+            WHEN salary >= 5000  THEN '중'
+            ELSE '하' END AS grade
+FROM   employees WHERE ROWNUM <= 7;` },
+
+  { title: '7. 함수 중첩과 종합 정리', content: `단일행 함수는 중첩하여 복잡한 변환을 수행할 수 있습니다.
+
+**함수 중첩 원칙**
+- 안쪽 함수가 먼저 실행됨
+- 최대 중첩 단계 제한 없음
+- 가독성을 위해 적절히 사용
+
+**ch03 핵심 요약**
+| 범주 | 대표 함수 | Oracle 특유 |
+|------|-----------|------------|
+| 문자 | SUBSTR, LENGTH | INITCAP, INSTR |
+| 숫자 | ROUND, TRUNC, MOD | — |
+| 날짜 | SYSDATE, TRUNC | MONTHS_BETWEEN, ADD_MONTHS, NEXT_DAY, LAST_DAY |
+| 변환 | TO_CHAR | TO_DATE, TO_NUMBER |
+| 일반 | COALESCE, NULLIF | NVL, NVL2, DECODE |`, code: `-- 종합: 직원 보고서
+SELECT UPPER(last_name) || ', ' || INITCAP(first_name)     AS name,
+       TO_CHAR(hire_date, 'YYYY-MM-DD')                    AS hire_dt,
+       TRUNC(MONTHS_BETWEEN(SYSDATE,hire_date)/12)||'년'   AS tenure,
+       TO_CHAR(salary*12, 'FM$9,999,999')                  AS annual_sal,
+       NVL2(commission_pct, '커미션O', '커미션X')           AS comm_yn,
+       CASE WHEN salary >= 10000 THEN '상'
+            WHEN salary >= 5000  THEN '중'
+            ELSE '하' END                                   AS grade
+FROM   employees
+WHERE  ROWNUM <= 5;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
+  ch03: CH03_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
