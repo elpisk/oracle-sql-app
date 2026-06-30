@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --nav-height: 52px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: #FBFBFD;
+  color: #1D1D1F;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 스크롤바 */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D2D2D7; border-radius: 999px; }
+
+/* 코드 블록 */
+pre {
+  background: #1E1E2E !important;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem !important;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+code {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  font-size: 0.875em;
+}
+
+p code, li code {
+  background: #F5F5F7;
+  color: #C7463B;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+/* prose 오버라이드 */
+.prose h2 { font-size: 1.4rem; font-weight: 700; margin-top: 2rem; color: #1D1D1F; }
+.prose h3 { font-size: 1.1rem; font-weight: 600; margin-top: 1.5rem; color: #1D1D1F; }
+.prose p  { line-height: 1.8; color: #1D1D1F; }
+.prose li { line-height: 1.8; color: #1D1D1F; }
+.prose table { font-size: 0.9rem; }
+.prose th { background: #F5F5F7; padding: 0.6rem 1rem; }
+.prose td { padding: 0.5rem 1rem; border-color: #D2D2D7; }
+
+/* 애니메이션 */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.45s ease forwards; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in { animation: fadeIn 0.3s ease forwards; }
