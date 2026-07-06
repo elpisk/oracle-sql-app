@@ -1250,11 +1250,261 @@ HAVING AVG(salary) > (SELECT AVG(salary) FROM employees)
 ORDER BY AVG(salary) DESC;` },
 ]
 
+const CH05_SECTIONS = [
+  { title: '1. 조인 개요와 카테시안 곱', content: `조인(JOIN)은 두 개 이상의 테이블에서 관련 데이터를 결합합니다. Oracle은 ANSI 표준 구문과 Oracle 전통 구문 두 가지를 모두 지원합니다.
+
+**카테시안 곱 (Cartesian Product)**
+- 조인 조건이 없을 때 발생
+- 테이블 A(n행) × 테이블 B(m행) = n×m행
+- 반드시 올바른 조인 조건으로 방지해야 함
+
+**조인 종류 요약**
+| 종류 | 설명 |
+|------|------|
+| INNER JOIN | 조건 만족하는 행만 반환 |
+| LEFT OUTER JOIN | 왼쪽 테이블 전체 + 매핑되는 오른쪽 |
+| RIGHT OUTER JOIN | 오른쪽 테이블 전체 + 매핑되는 왼쪽 |
+| FULL OUTER JOIN | 양쪽 테이블 모두 포함 |
+| SELF JOIN | 같은 테이블끼리 조인 |
+| NON-EQUIJOIN | = 이외의 조건으로 조인 |
+| CROSS JOIN | 카테시안 곱 명시 |
+
+**n개 테이블 → 최소 (n-1)개 조인 조건 필요**`, code: `-- 카테시안 곱 예시 (조인 조건 없음 — 의도하지 않은 결과 주의)
+SELECT e.last_name, d.department_name
+FROM   employees e, departments d;
+-- 107 × 27 = 2889행 반환!
+
+-- 올바른 INNER JOIN
+SELECT e.last_name, d.department_name
+FROM   employees   e
+JOIN   departments d ON e.department_id = d.department_id;
+-- 106행 반환 (department_id가 NULL인 직원 1명 제외)` },
+
+  { title: '2. INNER JOIN — ANSI와 Oracle 전통 구문', content: `INNER JOIN은 두 테이블에서 조인 조건을 만족하는 행만 반환합니다.
+
+**ANSI 구문 (권장)**
+\`\`\`sql
+SELECT ... FROM t1 JOIN t2 ON t1.col = t2.col
+SELECT ... FROM t1 JOIN t2 USING (col_name)
+SELECT ... FROM t1 NATURAL JOIN t2
+\`\`\`
+
+**Oracle 전통 구문**
+\`\`\`sql
+SELECT ... FROM t1, t2 WHERE t1.col = t2.col
+\`\`\`
+
+**JOIN ... USING 주의사항**
+- USING 절의 컬럼에 테이블 별칭 사용 불가 (ORA-25154)
+- 두 테이블의 컬럼 이름이 동일해야 함
+
+**NATURAL JOIN 주의사항**
+- 이름이 같은 모든 컬럼을 자동 조인 조건으로 사용 → 의도치 않은 행 제외 가능`, code: `-- ANSI INNER JOIN (ON 절)
+SELECT e.last_name, d.department_name
+FROM   employees   e
+JOIN   departments d ON e.department_id = d.department_id;
+
+-- Oracle 전통 구문 (동일 결과)
+SELECT e.last_name, d.department_name
+FROM   employees   e,
+       departments d
+WHERE  e.department_id = d.department_id;
+
+-- JOIN USING (컬럼 이름 동일 시)
+SELECT last_name, department_name
+FROM   employees
+JOIN   departments USING (department_id);  -- 별칭 없이 컬럼명만
+
+-- 3테이블 조인
+SELECT e.last_name, d.department_name, l.city
+FROM   employees   e
+JOIN   departments d ON e.department_id = d.department_id
+JOIN   locations   l ON d.location_id   = l.location_id;` },
+
+  { title: '3. NON-EQUIJOIN과 SELF JOIN', content: `**NON-EQUIJOIN (비등가 조인)**
+= 이외의 연산자(BETWEEN, <, >, <=, >=)를 조인 조건으로 사용합니다.
+
+대표 사례: 직원 급여 → 급여 등급 테이블의 범위에 매핑
+
+**SELF JOIN (자기 조인)**
+동일한 테이블을 서로 다른 별칭으로 두 번 참조합니다.
+
+대표 사례:
+- 직원(e)의 manager_id → 관리자(m)의 employee_id 연결
+- 같은 부서 직원 쌍 조회
+- 같은 급여 직원 비교`, code: `-- NON-EQUIJOIN: 급여 등급 조회 (BETWEEN 사용)
+SELECT e.last_name,
+       e.salary,
+       j.grade
+FROM   employees  e
+JOIN   job_grades j ON e.salary BETWEEN j.lowest_sal AND j.highest_sal;
+
+-- SELF JOIN: 직원과 관리자 이름 조회
+SELECT e.last_name AS 직원,
+       m.last_name AS 관리자
+FROM   employees e
+JOIN   employees m ON e.manager_id = m.employee_id
+ORDER BY m.last_name;
+
+-- SELF JOIN: 같은 부서 직원 쌍 (중복 제거)
+SELECT e1.department_id,
+       e1.last_name AS 직원1,
+       e2.last_name AS 직원2
+FROM   employees e1
+JOIN   employees e2
+    ON  e1.department_id = e2.department_id
+   AND  e1.employee_id   < e2.employee_id;` },
+
+  { title: '4. OUTER JOIN — LEFT, RIGHT, FULL', content: `OUTER JOIN은 조인 조건을 만족하지 않는 행도 결과에 포함합니다.
+
+**LEFT OUTER JOIN**
+- 왼쪽 테이블의 모든 행 유지
+- 오른쪽에서 일치하지 않으면 NULL 채움
+
+**RIGHT OUTER JOIN**
+- 오른쪽 테이블의 모든 행 유지
+- 왼쪽에서 일치하지 않으면 NULL 채움
+
+**FULL OUTER JOIN**
+- 양쪽 모두 포함, ANSI 구문 필수 (Oracle (+) 불가)
+
+**Oracle (+) 전통 구문**
+- WHERE t1.col = t2.col(+) → t1 기준 LEFT OUTER JOIN
+- WHERE t1.col(+) = t2.col → t2 기준 RIGHT OUTER JOIN
+- (+)를 양쪽에 사용하면 오류 발생 (FULL OUTER JOIN 불가)`, code: `-- LEFT OUTER JOIN: 부서 없는 직원 포함
+SELECT e.last_name, d.department_name
+FROM   employees   e
+LEFT   JOIN departments d ON e.department_id = d.department_id;
+
+-- Oracle (+) 전통 구문 (동일 결과)
+SELECT e.last_name, d.department_name
+FROM   employees   e, departments d
+WHERE  e.department_id = d.department_id(+);
+
+-- RIGHT OUTER JOIN: 직원 없는 부서 포함
+SELECT d.department_name, COUNT(e.employee_id) AS 직원수
+FROM   employees   e
+RIGHT  JOIN departments d ON e.department_id = d.department_id
+GROUP BY d.department_name
+ORDER BY d.department_name;
+
+-- FULL OUTER JOIN (ANSI 필수)
+SELECT e.last_name, d.department_name
+FROM   employees   e
+FULL   JOIN departments d ON e.department_id = d.department_id
+WHERE  e.employee_id IS NULL OR d.department_id IS NULL;` },
+
+  { title: '5. CROSS JOIN · 다중 조인 · 종합 정리', content: `**CROSS JOIN**
+조인 조건 없이 모든 행의 조합을 반환합니다.
+- ANSI: FROM t1 CROSS JOIN t2
+- Oracle 전통: FROM t1, t2 (WHERE 조건 없음)
+
+**다중 테이블 조인**
+- JOIN을 순차적으로 연결
+- n개 테이블 → (n-1)개 조인 조건
+
+**조인 구문 비교표**
+| 구분 | ANSI 구문 | Oracle (+) |
+|------|-----------|------------|
+| INNER | JOIN ... ON | WHERE t1.c = t2.c |
+| LEFT OUTER | LEFT JOIN ... ON | WHERE t1.c = t2.c(+) |
+| RIGHT OUTER | RIGHT JOIN ... ON | WHERE t1.c(+) = t2.c |
+| FULL OUTER | FULL JOIN ... ON | **불가** |
+| CROSS | CROSS JOIN | FROM t1, t2 (조건 없음) |
+
+**권장:** Oracle 19c에서는 ANSI 표준 구문 사용 권장`, code: `-- CROSS JOIN (107 × 27 = 2889행)
+SELECT e.last_name, d.department_name
+FROM   employees   e
+CROSS  JOIN departments d;
+
+-- 4테이블 다중 조인
+SELECT e.last_name, j.job_title, d.department_name, l.city
+FROM   employees   e
+JOIN   jobs        j ON e.job_id        = j.job_id
+JOIN   departments d ON e.department_id = d.department_id
+JOIN   locations   l ON d.location_id   = l.location_id
+ORDER BY l.city;
+
+-- 관리자가 없는 직원 포함 SELF JOIN + 부서 INNER JOIN 혼합
+SELECT e.last_name                    AS 직원,
+       NVL(m.last_name, '최고경영자') AS 관리자,
+       d.department_name
+FROM   employees   e
+LEFT   JOIN employees   m ON e.manager_id    = m.employee_id
+JOIN   departments  d ON e.department_id = d.department_id
+ORDER BY d.department_name, e.last_name;` },
+
+  { title: '6. 조인 심화 — ON 절과 WHERE 절 차이', content: `**OUTER JOIN에서 ON 절과 WHERE 절의 차이**
+
+| 위치 | 처리 시점 | OUTER JOIN 영향 |
+|------|-----------|----------------|
+| ON 절 추가 조건 | 조인 단계 | 불일치 행도 NULL로 포함 |
+| WHERE 절 조건 | 조인 완료 후 | NULL 행 제거 (INNER JOIN화) |
+
+**INNER JOIN에서는 ON과 WHERE 위치가 결과에 영향 없음**
+
+**조인 최적화 팁**
+- 조인 컬럼에 인덱스 생성
+- WHERE로 먼저 행을 줄인 후 조인
+- 불필요한 컬럼 SELECT 피하기
+- INNER JOIN 가능하면 OUTER JOIN 대신 사용`, code: `-- OUTER JOIN에서 ON vs WHERE 차이 비교
+
+-- ① ON에 추가 조건: 부서 90이 아니어도 직원 행은 유지됨
+SELECT e.last_name, d.department_id, d.department_name
+FROM   employees   e
+LEFT   JOIN departments d
+    ON  e.department_id = d.department_id
+   AND  d.department_id = 90;
+-- 107행 반환, 부서 90 외 직원은 department_name = NULL
+
+-- ② WHERE에 추가 조건: 부서 90 또는 부서 없는 직원만
+SELECT e.last_name, d.department_id, d.department_name
+FROM   employees   e
+LEFT   JOIN departments d ON e.department_id = d.department_id
+WHERE  d.department_id = 90
+   OR  d.department_id IS NULL;
+-- 4행 반환 (부서 90: 3명 + 미배정: 1명)` },
+
+  { title: '7. 조인 종합 실습', content: `다양한 조인 패턴을 결합한 실전 쿼리입니다.
+
+**실전 쿼리 패턴**
+1. JOIN + GROUP BY + HAVING — 부서 통계
+2. SELF JOIN + OUTER JOIN — 조직도
+3. 다중 JOIN + 서브쿼리 — 복합 보고서
+4. FULL OUTER JOIN + NULL 필터 — 불일치 데이터 탐지
+
+**Oracle 전통 vs ANSI 비교 요약**
+- 새 개발: ANSI 구문 사용 (더 가독성 높고 FULL OUTER JOIN 지원)
+- 레거시 코드 이해: Oracle (+) 구문 해독 가능해야 함
+- (+)의 한계: FULL OUTER JOIN 불가, OR 조건 혼용 불가, IN 절 혼용 불가`, code: `-- 종합 예제 1: 부서별 관리자·직원수·평균급여
+SELECT d.department_name,
+       m.last_name                  AS 관리자,
+       COUNT(e.employee_id)         AS 직원수,
+       ROUND(AVG(e.salary), 2)      AS 평균급여
+FROM   departments d
+JOIN   employees   m ON d.manager_id    = m.employee_id
+LEFT   JOIN employees   e ON e.department_id = d.department_id
+GROUP BY d.department_name, m.last_name
+HAVING COUNT(e.employee_id) >= 2
+ORDER BY AVG(e.salary) DESC;
+
+-- 종합 예제 2: 국가별 직원 수
+SELECT c.country_name,
+       COUNT(e.employee_id)    AS 직원수
+FROM   employees   e
+JOIN   departments d ON e.department_id = d.department_id
+JOIN   locations   l ON d.location_id   = l.location_id
+JOIN   countries   c ON l.country_id    = c.country_id
+GROUP BY c.country_name
+ORDER BY 직원수 DESC;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
   ch03: CH03_SECTIONS,
   ch04: CH04_SECTIONS,
+  ch05: CH05_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
