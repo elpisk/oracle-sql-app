@@ -2059,6 +2059,345 @@ FOR UPDATE NOWAIT;
 | 시스템 충돌 / 비정상 종료 | 자동 롤백 |` },
 ]
 
+const CH09_SECTIONS = [
+  { title: 'DDL 개요 및 데이터베이스 객체', content: `## DDL(Data Definition Language)이란?
+
+DDL은 데이터베이스 구조를 정의하는 SQL 문의 집합입니다.
+
+| 구문 | 기능 |
+|------|------|
+| CREATE | 데이터베이스 객체 생성 |
+| ALTER | 기존 객체 구조 변경 |
+| DROP | 객체 삭제 |
+| RENAME | 객체 이름 변경 |
+| TRUNCATE | 테이블의 모든 행 삭제 (DDL) |
+
+> **DDL vs DML**: DDL은 실행 즉시 자동 커밋됩니다. ROLLBACK으로 되돌릴 수 없습니다.
+
+### 데이터베이스 객체 종류
+
+| 객체 | 설명 |
+|------|------|
+| 테이블(Table) | 기본 데이터 저장 단위 |
+| 뷰(View) | 하나 이상의 테이블을 기반으로 하는 가상 테이블 |
+| 시퀀스(Sequence) | 자동 번호 생성기 |
+| 인덱스(Index) | 검색 성능 향상 |
+| 동의어(Synonym) | 객체에 대한 대체 이름 |
+
+### 테이블 이름 명명 규칙
+
+- 문자(A-Z)로 시작
+- 1~30자 길이
+- A-Z, 0-9, _, $, # 사용 가능
+- 공백, 예약어 사용 불가
+- 같은 스키마 내에서 고유한 이름` },
+
+  { title: 'CREATE TABLE — 구문·데이터 타입·DEFAULT', content: `## CREATE TABLE 기본 구문
+
+\`\`\`sql
+CREATE TABLE table_name (
+    column1 datatype [DEFAULT expr] [constraint],
+    column2 datatype [DEFAULT expr] [constraint],
+    ...
+    [table_constraint, ...]
+);
+\`\`\`
+
+---
+
+## 주요 데이터 타입
+
+| 타입 | 설명 | 예시 |
+|------|------|------|
+| VARCHAR2(n) | 가변 길이 문자, 최대 n바이트 | VARCHAR2(50) |
+| CHAR(n) | 고정 길이 문자, 항상 n바이트 | CHAR(2) |
+| NUMBER(p,s) | 숫자, 전체 p자리 소수 s자리 | NUMBER(8,2) |
+| DATE | 날짜+시분초 | — |
+| TIMESTAMP | 날짜+시분초+소수 초 | TIMESTAMP(6) |
+| CLOB | 대용량 텍스트 | — |
+
+> **VARCHAR2 vs CHAR**: VARCHAR2는 실제 길이만큼만 저장. CHAR는 항상 고정 길이.
+
+---
+
+## DEFAULT 옵션
+
+\`\`\`sql
+CREATE TABLE employees (
+    hire_date  DATE         DEFAULT SYSDATE,
+    status     VARCHAR2(10) DEFAULT 'Active',
+    count      NUMBER       DEFAULT 0
+);
+\`\`\`
+
+**DEFAULT 사용 제한:**
+- 다른 열 이름 참조 불가
+- ROWNUM, ROWID 등 의사열 불가
+- 리터럴, 함수(SYSDATE, USER), 표현식은 허용
+
+---
+
+## 서브쿼리로 테이블 생성 (CTAS)
+
+\`\`\`sql
+-- 구조 + 데이터 복사
+CREATE TABLE dept80 AS
+SELECT employee_id, last_name, salary
+FROM   employees
+WHERE  department_id = 80;
+
+-- 구조만 복사 (데이터 없음)
+CREATE TABLE empty_emp AS
+SELECT * FROM employees WHERE 1=2;
+\`\`\`
+
+**CTAS 복사 범위:**
+- 복사됨: 열 정의, 데이터, NOT NULL 제약
+- 복사 안 됨: PRIMARY KEY, UNIQUE, FOREIGN KEY, CHECK` },
+
+  { title: '제약 조건 — 5가지 유형', content: `## 제약 조건(Constraint) 개요
+
+제약 조건은 테이블 수준의 규칙으로 데이터 무결성을 보장합니다.
+
+### 5가지 제약 조건 유형
+
+| 유형 | 설명 | NULL 허용 |
+|------|------|----------|
+| NOT NULL | NULL 값 불허 | — |
+| UNIQUE | 모든 값이 고유 | 허용 |
+| PRIMARY KEY | NOT NULL + UNIQUE | 불허 |
+| FOREIGN KEY | 참조 무결성 유지 | 허용 |
+| CHECK | 행 조건 정의 | — |
+
+---
+
+## 제약 조건 정의 위치
+
+\`\`\`sql
+-- 열 수준 (Column Level)
+CREATE TABLE emp (
+    emp_id  NUMBER(6)   CONSTRAINT emp_pk PRIMARY KEY,
+    email   VARCHAR2(25) UNIQUE NOT NULL,
+    salary  NUMBER(8,2)  CHECK (salary > 0),
+    dept_id NUMBER(4)    REFERENCES departments(department_id)
+);
+
+-- 테이블 수준 (Table Level) — 복합 키에 필수
+CREATE TABLE emp (
+    emp_id  NUMBER(6),
+    dept_id NUMBER(4),
+    CONSTRAINT emp_pk PRIMARY KEY (emp_id),
+    CONSTRAINT emp_dept_fk FOREIGN KEY (dept_id)
+        REFERENCES departments(department_id)
+);
+\`\`\`
+
+> **복합 PRIMARY KEY**는 반드시 테이블 수준에서 정의해야 합니다.
+
+---
+
+## FOREIGN KEY 옵션
+
+\`\`\`sql
+-- ON DELETE CASCADE: 부모 삭제 시 자식도 삭제
+CONSTRAINT fk FOREIGN KEY (dept_id)
+    REFERENCES departments(dept_id)
+    ON DELETE CASCADE
+
+-- ON DELETE SET NULL: 부모 삭제 시 자식 FK를 NULL로
+CONSTRAINT fk FOREIGN KEY (dept_id)
+    REFERENCES departments(dept_id)
+    ON DELETE SET NULL
+\`\`\`
+
+> **ON DELETE SET NULL 주의**: 자식 열에 NOT NULL 제약이 있으면 오류 발생.
+
+---
+
+## CHECK 제약 조건 제한
+
+- 서브쿼리 불가
+- SYSDATE, ROWNUM 등 의사열 불가
+- 리터럴 비교, 동일 행 열 참조는 가능
+
+\`\`\`sql
+CHECK (salary > 0)          -- 유효
+CHECK (status IN ('A','B')) -- 유효
+CHECK (hire_date > SYSDATE) -- 오류! SYSDATE 불가
+\`\`\`` },
+
+  { title: 'ALTER TABLE — 구조 변경', content: `## ALTER TABLE 문
+
+### 열 추가 — ADD
+\`\`\`sql
+ALTER TABLE dept80
+ADD (job_id VARCHAR2(9) DEFAULT 'UNKNOWN');
+-- 새 열은 항상 마지막에 추가됨
+\`\`\`
+
+### 열 수정 — MODIFY
+\`\`\`sql
+-- 크기 확장 (항상 가능)
+ALTER TABLE dept80
+MODIFY (salary NUMBER(10,2));
+
+-- 기본값 변경
+ALTER TABLE dept80
+MODIFY (job_id DEFAULT 'SA_REP');
+
+-- 크기 축소 (데이터가 새 크기를 초과하면 오류)
+-- ORA-01441: cannot decrease column length
+\`\`\`
+
+### 열 삭제 — DROP
+\`\`\`sql
+ALTER TABLE dept80
+DROP (commission_pct);
+\`\`\`
+
+### 열 이름 변경 — RENAME COLUMN
+\`\`\`sql
+ALTER TABLE dept80
+RENAME COLUMN job_id TO position_id;
+\`\`\`
+
+### 미사용 표시 — SET UNUSED
+\`\`\`sql
+-- 열을 숨김 처리 (SELECT/DML에서 접근 불가)
+ALTER TABLE dept80
+SET UNUSED (commission_pct);
+
+-- 실제 삭제 (나중에 실행)
+ALTER TABLE dept80
+DROP UNUSED COLUMNS;
+\`\`\`
+
+> **SET UNUSED 사용 이유**: 대형 테이블에서 즉시 DROP COLUMN은 장시간 잠금 발생.
+> SET UNUSED로 먼저 숨기고, 사용량이 적은 시간대에 DROP UNUSED COLUMNS 실행.
+
+### 읽기 전용 설정
+\`\`\`sql
+ALTER TABLE dept80 READ ONLY;   -- DML 불가
+ALTER TABLE dept80 READ WRITE;  -- 쓰기 복원
+\`\`\`` },
+
+  { title: 'DROP TABLE 및 데이터 딕셔너리', content: `## DROP TABLE 문
+
+### 기본 삭제 — Recycle Bin으로 이동
+\`\`\`sql
+DROP TABLE dept80;
+-- → Recycle Bin으로 이동, FLASHBACK으로 복구 가능
+\`\`\`
+
+### 복구 — FLASHBACK TABLE
+\`\`\`sql
+-- Recycle Bin 확인
+SELECT object_name, original_name FROM recyclebin;
+
+-- 복구
+FLASHBACK TABLE dept80 TO BEFORE DROP;
+\`\`\`
+
+### 즉시 완전 삭제 — PURGE
+\`\`\`sql
+DROP TABLE dept80 PURGE;
+-- → Recycle Bin 없이 즉시 삭제, 복구 불가
+\`\`\`
+
+---
+
+## 데이터 딕셔너리 뷰
+
+| 뷰 | 설명 |
+|----|------|
+| USER_TABLES | 현재 사용자 소유 테이블 목록 |
+| USER_CONSTRAINTS | 제약 조건 정보 |
+| USER_CONS_COLUMNS | 제약 조건과 열 매핑 |
+| USER_COLUMNS | 열 정보 |
+
+\`\`\`sql
+-- 테이블 목록 조회
+SELECT table_name, status, read_only
+FROM   user_tables;
+
+-- 제약 조건 조회
+SELECT constraint_name, constraint_type, column_name
+FROM   user_constraints c
+JOIN   user_cons_columns cc USING (constraint_name, table_name)
+WHERE  table_name = 'EMPLOYEES';
+\`\`\`
+
+**constraint_type 값:**
+- P: PRIMARY KEY
+- U: UNIQUE
+- R: FOREIGN KEY (Referential)
+- C: CHECK (NOT NULL 포함)` },
+
+  { title: 'DDL 종합 — 설계 패턴과 주의사항', content: `## 테이블 설계 실전 패턴
+
+### 1. 명시적 제약 조건 이름 사용
+\`\`\`sql
+CREATE TABLE orders (
+    order_id   NUMBER(10)  CONSTRAINT ord_pk PRIMARY KEY,
+    status     VARCHAR2(20) CONSTRAINT ord_status_ck
+                            CHECK (status IN ('PENDING','SHIPPED','CANCELLED'))
+);
+\`\`\`
+제약 조건에 이름을 부여하면 오류 메시지에서 어떤 제약 조건인지 쉽게 식별합니다.
+
+### 2. 선택적 데이터 백업 패턴
+\`\`\`sql
+-- 구조만 있는 빈 백업 테이블 생성
+CREATE TABLE emp_backup AS
+SELECT * FROM employees WHERE 1=2;
+
+-- 필요한 데이터만 삽입
+INSERT INTO emp_backup
+SELECT * FROM employees WHERE hire_date < '01-JAN-2000';
+\`\`\`
+
+### 3. FK 삭제 순서 주의
+\`\`\`sql
+-- 자식 테이블 먼저 삭제
+DROP TABLE orders;    -- FK: customers, products 참조
+DROP TABLE customers;
+DROP TABLE products;
+
+-- 또는 CASCADE CONSTRAINTS 사용
+DROP TABLE customers CASCADE CONSTRAINTS;
+\`\`\`
+
+---
+
+## DDL 주요 제한 사항 정리
+
+| 항목 | 제한 |
+|------|------|
+| 테이블 이름 | 문자 시작, 1~30자 |
+| DEFAULT | 다른 열 참조 불가 |
+| CHECK | 서브쿼리, SYSDATE 불가 |
+| MODIFY 축소 | 기존 데이터 초과 시 오류 |
+| DROP COLUMN | 대형 테이블 잠금 주의 → SET UNUSED 권장 |
+| CTAS | NOT NULL 제외 제약 조건 미복사 |
+| DROP TABLE | 기본값은 Recycle Bin 이동 |
+
+---
+
+## 자동 커밋 주의
+
+DDL 실행 시 이전의 미커밋 DML도 함께 자동 커밋됩니다.
+
+\`\`\`sql
+UPDATE employees SET salary = 99999 WHERE employee_id = 100;
+-- ↑ 미커밋 DML
+
+CREATE TABLE temp (id NUMBER);  -- DDL → 자동 커밋 발생
+-- ↑ 위 UPDATE도 함께 커밋됨
+
+ROLLBACK;  -- 효과 없음 (이미 커밋됨)
+\`\`\`` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -2068,6 +2407,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch06: CH06_SECTIONS,
   ch07: CH07_SECTIONS,
   ch08: CH08_SECTIONS,
+  ch09: CH09_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
