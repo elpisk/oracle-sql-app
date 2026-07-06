@@ -2593,6 +2593,177 @@ SELECT * FROM high_sal_vu WHERE department_id = 80;
 SELECT * FROM dept80_high_sal_vu;` },
 ]
 
+const CH11_SECTIONS = [
+  { title: '1. 시퀀스 개요와 생성', content: `시퀀스(Sequence)는 고유한 숫자 값을 자동으로 생성하는 데이터베이스 객체입니다. 주로 기본 키 자동 생성에 사용합니다.
+
+**CREATE SEQUENCE 구문**
+\`\`\`sql
+CREATE SEQUENCE sequence_name
+  [START WITH n]
+  [INCREMENT BY n]
+  [{MAXVALUE n | NOMAXVALUE}]
+  [{MINVALUE n | NOMINVALUE}]
+  [{CYCLE | NOCYCLE}]
+  [{CACHE n | NOCACHE}]
+  [{ORDER | NOORDER}];
+\`\`\`
+
+**주요 옵션**
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| START WITH | 1 | 시작 값 |
+| INCREMENT BY | 1 | 증가량 (음수면 감소) |
+| MAXVALUE | 10^27 | 최대값 |
+| NOCYCLE | 기본 | 최대값 도달 시 오류 |
+| CACHE 20 | 20 | 메모리에 미리 생성할 값 수 |
+| NOCACHE | — | 캐시 없이 매번 디스크 저장 |`, code: `-- 기본 시퀀스 생성
+CREATE SEQUENCE dept_deptid_seq
+    START WITH   280
+    INCREMENT BY 10
+    MAXVALUE     9999
+    NOCACHE
+    NOCYCLE;
+
+-- NEXTVAL: 다음 값 반환 (호출마다 증가)
+SELECT dept_deptid_seq.NEXTVAL FROM dual;   -- 280
+SELECT dept_deptid_seq.NEXTVAL FROM dual;   -- 290
+
+-- CURRVAL: 현재 세션의 마지막 NEXTVAL 값
+SELECT dept_deptid_seq.CURRVAL FROM dual;   -- 290
+
+-- INSERT에 NEXTVAL 사용
+INSERT INTO departments (department_id, department_name, location_id)
+VALUES (dept_deptid_seq.NEXTVAL, 'Support', 2500);
+
+-- Oracle 12c+: DEFAULT에 시퀀스 사용
+CREATE TABLE new_emp (
+    id   NUMBER DEFAULT emp_seq.NEXTVAL NOT NULL,
+    name VARCHAR2(50)
+);
+INSERT INTO new_emp (name) VALUES ('Alice');  -- id 자동 할당` },
+
+  { title: '2. 시퀀스 관리', content: `시퀀스의 수정, 삭제, 딕셔너리 조회, 갭 발생 원인을 이해합니다.
+
+**ALTER SEQUENCE**
+- INCREMENT BY, MAXVALUE, MINVALUE, CYCLE, CACHE 변경 가능
+- **START WITH는 변경 불가** → DROP 후 재생성 필요
+
+**시퀀스 갭(Gap) 발생 원인**
+| 원인 | 설명 |
+|------|------|
+| 트랜잭션 롤백 | NEXTVAL 호출 후 ROLLBACK 해도 시퀀스 복원 안 됨 |
+| 시스템 크래시 | CACHE 사용 시 메모리 캐시 손실 |
+| 여러 테이블 공유 | 다른 트랜잭션이 NEXTVAL 소비 |
+
+**⚠️ 감사 요건(갭 없음)이 있다면**: NOCACHE 사용
+
+**USER_SEQUENCES 주요 컬럼**
+| 컬럼 | 설명 |
+|------|------|
+| SEQUENCE_NAME | 시퀀스 이름 |
+| LAST_NUMBER | 다음 캐시 블록 시작 값 |
+| CYCLE_FLAG | CYCLE 여부 |
+| CACHE_SIZE | 캐시 크기 |`, code: `-- 시퀀스 수정 (INCREMENT BY, MAXVALUE 변경 가능)
+ALTER SEQUENCE dept_deptid_seq
+    INCREMENT BY 20
+    MAXVALUE 99999;
+
+-- START WITH 변경은 불가 → DROP 후 재생성
+DROP SEQUENCE dept_deptid_seq;
+CREATE SEQUENCE dept_deptid_seq START WITH 100;
+
+-- 시퀀스 삭제
+DROP SEQUENCE dept_deptid_seq;
+
+-- 딕셔너리 조회
+SELECT sequence_name, min_value, max_value,
+       increment_by, cycle_flag, cache_size, last_number
+FROM   user_sequences;
+
+-- 갭 발생 확인
+SELECT my_seq.NEXTVAL FROM dual;  -- 1 (시퀀스 진행)
+INSERT INTO orders VALUES (my_seq.NEXTVAL, 'A');  -- 2
+ROLLBACK;  -- INSERT 취소, 시퀀스는 2에 머묾
+SELECT my_seq.NEXTVAL FROM dual;  -- 3 (2는 갭)` },
+
+  { title: '3. 동의어 개요와 생성', content: `동의어(Synonym)는 테이블, 뷰, 시퀀스 등 데이터베이스 객체에 대한 대체 이름입니다. 데이터를 저장하지 않고 딕셔너리에 이름 매핑만 저장합니다.
+
+**동의어의 용도**
+- 긴 스키마 한정 이름 단축 (hr.employees → emp)
+- 기반 객체 변경 시 애플리케이션 투명성 유지
+- 원격 DB 객체 접근 단순화 (DB Link 연계)
+
+**PRIVATE vs PUBLIC 동의어**
+| | PRIVATE | PUBLIC |
+|---|---|---|
+| 접근 범위 | 생성한 사용자만 | 모든 DB 사용자 |
+| 생성 권한 | CREATE SYNONYM | CREATE PUBLIC SYNONYM |
+| 우선순위 | 동명의 PUBLIC보다 우선 | PRIVATE 없는 경우 적용 |
+
+**구문**
+\`\`\`sql
+CREATE [OR REPLACE] [PUBLIC] SYNONYM synonym_name
+FOR [schema.]object[@dblink];
+\`\`\``, code: `-- 개인 동의어 생성
+CREATE SYNONYM emp FOR employees;
+CREATE SYNONYM emp FOR hr.employees;  -- 다른 스키마 객체
+
+-- 동의어로 SELECT, DML 사용 (일반 테이블과 동일)
+SELECT * FROM emp WHERE department_id = 80;
+UPDATE emp SET salary = 9000 WHERE employee_id = 100;
+
+-- CREATE OR REPLACE: 기존 동의어 재정의
+CREATE OR REPLACE SYNONYM emp FOR departments;  -- 참조 대상 변경
+
+-- PUBLIC 동의어 (DBA 권한 필요)
+CREATE PUBLIC SYNONYM employees FOR hr.employees;
+-- 모든 사용자가 hr.employees를 employees로 접근 가능
+
+-- 동의어 삭제
+DROP SYNONYM emp;
+DROP PUBLIC SYNONYM employees;  -- PUBLIC 삭제 시 PUBLIC 키워드 필요` },
+
+  { title: '4. 동의어 관리와 딕셔너리', content: `동의어의 정보 조회, 상태, 주의사항을 정리합니다.
+
+**USER_SYNONYMS 주요 컬럼**
+| 컬럼 | 설명 |
+|------|------|
+| SYNONYM_NAME | 동의어 이름 |
+| TABLE_OWNER | 참조 객체 소유자 |
+| TABLE_NAME | 참조 객체 이름 |
+| DB_LINK | 원격 DB 링크 이름 (로컬이면 NULL) |
+
+**동의어 관련 주의사항**
+- 생성 시 참조 객체 존재 여부 검사 안 함 → 사용 시 오류
+- 참조 객체 삭제 시 동의어는 자동 삭제 안 됨 → 사용 시 ORA-04043
+- 동의어를 통한 DML은 원본 객체에 직접 적용됨
+- DESCRIBE 동의어명 → 원본 객체 구조 표시
+
+**범위별 딕셔너리 뷰**
+- USER_SYNONYMS: 현재 사용자 소유
+- ALL_SYNONYMS: 접근 가능한 모든 동의어
+- DBA_SYNONYMS: DB 전체 (DBA 전용)`, code: `-- 동의어 목록 조회
+SELECT synonym_name, table_owner, table_name, db_link
+FROM   user_synonyms
+ORDER BY synonym_name;
+
+-- 특정 동의어 정보 확인
+SELECT * FROM user_synonyms WHERE synonym_name = 'EMP';
+
+-- 동의어 구조 확인 (원본 테이블 구조 표시)
+DESCRIBE emp;
+
+-- 참조 객체 없는 동의어 생성 (생성은 성공)
+CREATE SYNONYM ghost FOR ghost_table;
+SELECT * FROM ghost;  -- ORA-04043: object does not exist
+
+-- USER_OBJECTS에서 전체 동의어/시퀀스 확인
+SELECT object_name, object_type, status
+FROM   user_objects
+WHERE  object_type IN ('SYNONYM', 'SEQUENCE')
+ORDER BY object_type, object_name;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -2604,6 +2775,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch08: CH08_SECTIONS,
   ch09: CH09_SECTIONS,
   ch10: CH10_SECTIONS,
+  ch11: CH11_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
