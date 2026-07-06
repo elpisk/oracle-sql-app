@@ -1823,6 +1823,242 @@ ORDER BY 3 DESC;
 -- 의도한 순서가 다를 경우 괄호 사용 필수` },
 ]
 
+const CH08_SECTIONS = [
+  { title: 'DML 개요', content: `## DML(Data Manipulation Language)이란?
+
+DML은 테이블의 데이터를 조작하는 SQL 문의 집합입니다.
+
+| 구문 | 기능 |
+|------|------|
+| INSERT | 테이블에 새 행 추가 |
+| UPDATE | 테이블의 기존 행 수정 |
+| DELETE | 테이블에서 행 제거 |
+| TRUNCATE | 테이블의 모든 행 삭제 (DDL) |
+
+> **DML vs DDL**: INSERT/UPDATE/DELETE는 DML로 ROLLBACK 가능합니다.
+> TRUNCATE는 DDL로 자동 커밋되어 ROLLBACK이 불가합니다.
+
+### HR 스키마 실습 테이블 준비
+\`\`\`sql
+-- COPY_EMP 테이블 생성 (구조만)
+CREATE TABLE copy_emp AS SELECT * FROM employees WHERE 1=2;
+
+-- 또는 데이터 포함하여 생성
+CREATE TABLE copy_emp AS SELECT * FROM employees;
+\`\`\`
+
+실습 후에는 반드시 ROLLBACK 또는 COMMIT으로 트랜잭션을 종료하세요.` },
+
+  { title: 'INSERT 문', content: `## INSERT 문 — 새 행 삽입
+
+### 기본 구문 (열 목록 명시)
+\`\`\`sql
+INSERT INTO table_name (column1, column2, ...)
+VALUES (value1, value2, ...);
+\`\`\`
+
+### 열 목록 생략 — 모든 열 순서대로 제공
+\`\`\`sql
+INSERT INTO departments
+VALUES (280, 'Research', 100, 1700);
+\`\`\`
+
+### NULL 삽입
+\`\`\`sql
+-- 암묵적(implicit): 열 목록에서 생략
+INSERT INTO departments (department_id, department_name)
+VALUES (290, 'Corporate Tax');
+
+-- 명시적(explicit): NULL 키워드 사용
+INSERT INTO departments
+VALUES (300, 'Strategy', NULL, NULL);
+\`\`\`
+
+### 날짜 함수 활용
+\`\`\`sql
+-- CURRENT_DATE: 현재 날짜/시간 (세션 시간대 기준)
+INSERT INTO employees (..., hire_date, ...)
+VALUES (..., CURRENT_DATE, ...);
+
+-- TO_DATE: 문자열을 날짜로 변환
+INSERT INTO employees (..., hire_date, ...)
+VALUES (..., TO_DATE('15-JAN-2020', 'DD-MON-YYYY'), ...);
+\`\`\`
+
+### 서브쿼리를 이용한 다중 행 삽입
+\`\`\`sql
+-- VALUES 절 없이 서브쿼리 사용
+INSERT INTO copy_emp
+SELECT * FROM employees
+WHERE  job_id LIKE '%REP%';
+\`\`\`
+
+> **주의**: 서브쿼리 방식은 VALUES 절을 사용하지 않습니다.
+> 서브쿼리가 반환하는 모든 행이 한 번에 삽입됩니다.` },
+
+  { title: 'UPDATE 문', content: `## UPDATE 문 — 기존 행 수정
+
+### 기본 구문
+\`\`\`sql
+UPDATE table_name
+SET    column1 = value1 [, column2 = value2, ...]
+[WHERE condition];
+\`\`\`
+
+### WHERE 절 생략 시 전체 행 수정
+\`\`\`sql
+-- 모든 사원의 salary를 10% 인상 (주의!)
+UPDATE employees
+SET    salary = salary * 1.1;
+\`\`\`
+
+### 서브쿼리로 값 참조
+\`\`\`sql
+-- employee_id=103의 job_id, salary를 employee_id=205 기준으로 변경
+UPDATE employees
+SET    (job_id, salary) = (SELECT job_id, salary
+                            FROM   employees
+                            WHERE  employee_id = 205)
+WHERE  employee_id = 103;
+\`\`\`
+
+### NULL로 업데이트
+\`\`\`sql
+UPDATE employees
+SET    commission_pct = NULL
+WHERE  employee_id = 115;
+\`\`\`
+
+### 서브쿼리 기반 조건 UPDATE
+\`\`\`sql
+-- 부서 50의 평균 급여보다 낮은 사원을 평균 급여로 업데이트
+UPDATE employees
+SET    salary = (SELECT AVG(salary) FROM employees WHERE department_id = 50)
+WHERE  department_id = 50
+AND    salary < (SELECT AVG(salary) FROM employees WHERE department_id = 50);
+\`\`\`
+
+> **Oracle 특성**: UPDATE 서브쿼리는 UPDATE 이전 시점의 데이터를 기준으로 계산됩니다.` },
+
+  { title: 'DELETE / TRUNCATE 문', content: `## DELETE 문 — 행 삭제
+
+### 기본 구문
+\`\`\`sql
+DELETE FROM table_name
+[WHERE condition];
+\`\`\`
+
+### 단일 행 삭제
+\`\`\`sql
+DELETE FROM departments
+WHERE  department_id = 300;
+\`\`\`
+
+### WHERE 생략 시 전체 행 삭제 (ROLLBACK 가능)
+\`\`\`sql
+DELETE FROM copy_emp;
+\`\`\`
+
+### 서브쿼리 기반 삭제
+\`\`\`sql
+-- 부서 이름에 'Public'이 포함된 부서의 사원 삭제
+DELETE FROM employees
+WHERE  department_id IN (
+    SELECT department_id
+    FROM   departments
+    WHERE  department_name LIKE '%Public%'
+);
+\`\`\`
+
+---
+
+## TRUNCATE TABLE — 빠른 전체 삭제
+
+\`\`\`sql
+TRUNCATE TABLE copy_emp;
+\`\`\`
+
+| 구분 | DELETE | TRUNCATE |
+|------|--------|----------|
+| 분류 | DML | DDL |
+| ROLLBACK | 가능 | 불가 |
+| WHERE 조건 | 가능 | 불가 |
+| 트리거 실행 | 예 | 아니오 |
+| 속도 | 상대적으로 느림 | 빠름 |
+| HWM 초기화 | 아니오 | 예 |
+
+> **TRUNCATE 주의**: DDL 문으로 자동 커밋이 발생합니다.
+> 이전의 미커밋 DML 변경도 함께 커밋됩니다.` },
+
+  { title: '트랜잭션 제어', content: `## 트랜잭션이란?
+
+트랜잭션은 하나의 논리적 작업 단위로 묶인 DML 문의 집합입니다.
+
+### 트랜잭션 시작과 종료
+- **시작**: 첫 번째 DML 문 실행 시
+- **종료**: COMMIT, ROLLBACK, DDL/DCL 실행, 정상 세션 종료(자동 커밋), 비정상 종료(자동 롤백)
+
+---
+
+## COMMIT / ROLLBACK / SAVEPOINT
+
+\`\`\`sql
+-- COMMIT: 변경 사항 영구 저장
+INSERT INTO departments VALUES (280, 'Research', 100, 1700);
+COMMIT;
+
+-- ROLLBACK: 모든 미커밋 변경 취소
+INSERT INTO departments VALUES (290, 'Test', NULL, NULL);
+ROLLBACK;
+
+-- SAVEPOINT + ROLLBACK TO: 특정 시점까지만 취소
+INSERT INTO departments VALUES (310, 'Dept A', NULL, 1700);
+SAVEPOINT sp1;
+INSERT INTO departments VALUES (320, 'Dept B', NULL, 1700);
+ROLLBACK TO sp1;  -- Dept B만 취소, Dept A는 유지
+COMMIT;           -- Dept A 영구 저장
+\`\`\`
+
+---
+
+## 읽기 일관성 (Read Consistency)
+
+Oracle은 **언두(Undo) 세그먼트**를 사용하여 읽기 일관성을 보장합니다.
+
+- 독자(Reader)는 쓰기(Writer)를 기다리지 않습니다.
+- 쓰기(Writer)는 읽기(Reader)를 차단하지 않습니다.
+- 다른 세션은 COMMIT 전까지 변경 이전 데이터를 봅니다.
+
+---
+
+## FOR UPDATE — 행 잠금
+
+\`\`\`sql
+-- 조회한 행에 잠금 설정
+SELECT employee_id, salary
+FROM   employees
+WHERE  job_id = 'SA_REP'
+FOR UPDATE;
+
+-- NOWAIT: 잠긴 행 있으면 즉시 오류(ORA-00054) 반환
+SELECT employee_id FROM employees WHERE department_id = 50
+FOR UPDATE NOWAIT;
+\`\`\`
+
+> COMMIT 또는 ROLLBACK 시 잠금이 해제됩니다.
+
+---
+
+## 자동 커밋 / 자동 롤백
+
+| 상황 | 결과 |
+|------|------|
+| DDL 문 실행 | 자동 커밋 (이전 DML 포함) |
+| DCL 문 실행 | 자동 커밋 |
+| 정상 세션 종료 | 자동 커밋 |
+| 시스템 충돌 / 비정상 종료 | 자동 롤백 |` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -1831,6 +2067,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch05: CH05_SECTIONS,
   ch06: CH06_SECTIONS,
   ch07: CH07_SECTIONS,
+  ch08: CH08_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
