@@ -2966,6 +2966,294 @@ WHERE  table_name LIKE '%INDEX%'
 ORDER BY table_name;` },
 ]
 
+const CH13_SECTIONS = [
+  { title: '1. 분석 함수 개요와 OVER() 절', content: `분석 함수(Analytic Function)는 OVER() 절을 사용하여 각 행에 대해 집계/순위/이동 계산을 수행하면서도 원본 행 수를 유지하는 함수입니다.
+
+**GROUP BY 집계 vs 분석 함수**
+| 구분 | GROUP BY 집계 | 분석 함수 |
+|------|-------------|---------|
+| 반환 행 수 | 그룹당 1행 | 원본 행 수 유지 |
+| 상세 데이터 | 사라짐 | 유지 |
+| 키워드 | 없음 | OVER() |
+
+**OVER() 절 구성**
+\`\`\`
+함수명() OVER(
+  [PARTITION BY 열]   -- 논리적 파티션 분할
+  [ORDER BY 열]       -- 파티션 내 정렬
+  [윈도우 프레임]     -- 계산 범위 지정
+)
+\`\`\`
+
+**쿼리 실행 순서**
+FROM → WHERE → GROUP BY → HAVING → **분석 함수 실행** → ORDER BY
+
+분석 함수는 WHERE/GROUP BY/HAVING 처리 후 실행됩니다. 따라서 분석 함수 결과를 WHERE 절에서 직접 필터링할 수 없으며, 서브쿼리 또는 CTE를 사용해야 합니다.`, code: `-- PARTITION BY 없음: 전체 집합 하나의 파티션
+SELECT employee_id, last_name, salary,
+       SUM(salary) OVER() AS total_sal
+FROM   employees;
+
+-- PARTITION BY: 부서별 파티션
+SELECT employee_id, last_name, department_id, salary,
+       SUM(salary) OVER(PARTITION BY department_id) AS dept_sal
+FROM   employees;
+
+-- 분석 함수 결과로 필터링: 서브쿼리 필요
+SELECT * FROM (
+    SELECT employee_id, last_name, salary,
+           RANK() OVER(ORDER BY salary DESC) AS rnk
+    FROM   employees
+)
+WHERE rnk <= 5;` },
+
+  { title: '2. 순위 함수 (ROW_NUMBER, RANK, DENSE_RANK)', content: `세 가지 순위 함수는 동점 처리 방식이 다릅니다.
+
+**동점 처리 비교** (급여: 9000, 7000, 7000, 5000)
+| 함수 | 동점 처리 | 결과 예 |
+|------|---------|--------|
+| ROW_NUMBER() | 고유 순번 (임의) | 1, 2, 3, 4 |
+| RANK() | 동점 같은 번호, 다음 건너뜀 | 1, 2, 2, 4 |
+| DENSE_RANK() | 동점 같은 번호, 연속 | 1, 2, 2, 3 |
+
+**PARTITION BY 사용**: 각 파티션(부서 등)마다 독립적으로 순위 계산
+
+**상위 N위 조회 패턴**
+\`\`\`sql
+SELECT * FROM (
+    SELECT 열들,
+           DENSE_RANK() OVER(PARTITION BY 그룹열
+                             ORDER BY 정렬열 DESC) AS rnk
+    FROM 테이블
+)
+WHERE rnk <= N;
+\`\`\``, code: `-- 세 순위 함수 비교
+SELECT employee_id, last_name, salary,
+       ROW_NUMBER()  OVER(ORDER BY salary DESC) AS row_num,
+       RANK()        OVER(ORDER BY salary DESC) AS rnk,
+       DENSE_RANK()  OVER(ORDER BY salary DESC) AS dense_rnk
+FROM   employees
+ORDER BY salary DESC;
+
+-- 부서별 순위
+SELECT employee_id, last_name, department_id, salary,
+       RANK() OVER(PARTITION BY department_id
+                  ORDER BY salary DESC) AS dept_rank
+FROM   employees
+WHERE  department_id IS NOT NULL;
+
+-- 부서별 상위 2위
+SELECT * FROM (
+    SELECT e.*,
+           DENSE_RANK() OVER(PARTITION BY department_id
+                             ORDER BY salary DESC) AS dr
+    FROM employees e WHERE department_id IS NOT NULL
+)
+WHERE dr <= 2;` },
+
+  { title: '3. NTILE과 집계 분석 함수', content: `**NTILE(n)**: 데이터를 n개의 동등한 버킷으로 분할하여 버킷 번호(1~n) 부여
+
+| 총 행 수 | NTILE(4) 분배 |
+|---------|-------------|
+| 12행 | 각 버킷 3행 |
+| 10행 | 버킷1~2: 3행, 버킷3~4: 2행 (나머지를 앞 버킷에 배분) |
+| 7행 | 버킷1~3: 2행, 버킷4: 1행 |
+
+**집계 분석 함수** (SUM, AVG, COUNT, MIN, MAX + OVER)
+- **OVER()**: 전체 집합 집계
+- **OVER(PARTITION BY)**: 파티션별 집계
+- **OVER(ORDER BY)**: 누적 집계 (기본 RANGE UNBOUNDED PRECEDING TO CURRENT ROW)
+
+**PERCENT_RANK()**: (RANK-1)/(전체행수-1) → 0~1 백분위
+**CUME_DIST()**: 현재 이하 행 비율 → 0 초과~1`, code: `-- NTILE: 4분위
+SELECT employee_id, last_name, salary,
+       NTILE(4) OVER(ORDER BY salary) AS quartile
+FROM   employees;
+
+-- 분위별 평균
+SELECT quartile, COUNT(*) cnt, ROUND(AVG(salary),0) avg_sal
+FROM (SELECT salary, NTILE(4) OVER(ORDER BY salary) AS quartile FROM employees)
+GROUP BY quartile ORDER BY quartile;
+
+-- 집계 분석 함수
+SELECT employee_id, department_id, salary,
+       SUM(salary) OVER(PARTITION BY department_id) AS dept_total,
+       AVG(salary) OVER(PARTITION BY department_id) AS dept_avg,
+       COUNT(*)    OVER(PARTITION BY department_id) AS dept_cnt,
+       SUM(salary) OVER()                           AS grand_total
+FROM   employees;
+
+-- PERCENT_RANK와 CUME_DIST
+SELECT last_name, salary,
+       ROUND(PERCENT_RANK() OVER(ORDER BY salary)*100, 1) AS pct_rank,
+       ROUND(CUME_DIST()    OVER(ORDER BY salary)*100, 1) AS cum_dist
+FROM   employees;` },
+
+  { title: '4. 윈도우 프레임 (ROWS/RANGE BETWEEN)', content: `ORDER BY가 있는 분석 함수는 기본 윈도우가 **RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW** (현재 행까지 누적)입니다.
+
+**윈도우 프레임 구문**
+\`\`\`
+ROWS|RANGE BETWEEN 시작 AND 끝
+\`\`\`
+
+**경계 키워드**
+| 키워드 | 의미 |
+|--------|------|
+| UNBOUNDED PRECEDING | 파티션의 첫 번째 행 |
+| n PRECEDING | 현재보다 n행 이전 |
+| CURRENT ROW | 현재 행 |
+| n FOLLOWING | 현재보다 n행 이후 |
+| UNBOUNDED FOLLOWING | 파티션의 마지막 행 |
+
+**ROWS vs RANGE**
+- **ROWS**: 물리적 행 개수 기준 (정확한 n번째 행)
+- **RANGE**: 값 기준 (동일 값의 모든 행 포함)
+- 동점이 없으면 결과 동일, 동점이 있으면 RANGE가 더 많은 행 포함`, code: `-- 누적 합계 (파티션 시작~현재)
+SUM(salary) OVER(ORDER BY hire_date
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+
+-- 전체 파티션 합계
+SUM(salary) OVER(PARTITION BY dept
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+
+-- 3행 이동 평균 (이전 2행 + 현재)
+AVG(salary) OVER(ORDER BY salary
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)
+
+-- 5행 이동 윈도우 (이전 2 + 현재 + 다음 2)
+AVG(salary) OVER(ORDER BY salary
+    ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING)
+
+-- ROWS vs RANGE 동점 차이
+SELECT last_name, salary,
+       SUM(salary) OVER(ORDER BY salary
+           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS rows_sum,
+       SUM(salary) OVER(ORDER BY salary
+           RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS range_sum
+FROM employees WHERE department_id = 80 ORDER BY salary;` },
+
+  { title: '5. LAG, LEAD 함수', content: `LAG와 LEAD는 현재 행 기준으로 이전/이후 행의 값을 반환합니다.
+
+**구문**
+\`\`\`sql
+LAG(열, [오프셋], [기본값]) OVER([PARTITION BY] ORDER BY)
+LEAD(열, [오프셋], [기본값]) OVER([PARTITION BY] ORDER BY)
+\`\`\`
+- 오프셋 기본값 = 1
+- 기본값: 이전/이후 행이 없을 때 반환 (기본 NULL)
+
+**활용 사례**
+| 활용 | 함수 |
+|------|------|
+| 전년도 매출 비교 | LAG(매출, 1) OVER(ORDER BY 연도) |
+| 전월 대비 증감 | 매출 - LAG(매출) OVER(ORDER BY 월) |
+| 다음 목표 급여 | LEAD(salary) OVER(ORDER BY salary) |
+| 부서 내 이전 입사자 | LAG(이름) OVER(PARTITION BY dept ORDER BY hire_date) |`, code: `-- 기본 LAG, LEAD
+SELECT employee_id, last_name, hire_date, salary,
+       LAG(salary, 1, 0)  OVER(ORDER BY hire_date) AS prev_sal,
+       LEAD(salary, 1, 0) OVER(ORDER BY hire_date) AS next_sal
+FROM   employees
+ORDER BY hire_date;
+
+-- 전년 대비 입사 수 증감
+SELECT hire_year, cnt,
+       LAG(cnt, 1, 0) OVER(ORDER BY hire_year) AS prev_cnt,
+       cnt - LAG(cnt, 1, 0) OVER(ORDER BY hire_year) AS diff
+FROM (
+    SELECT EXTRACT(YEAR FROM hire_date) hire_year, COUNT(*) cnt
+    FROM   employees GROUP BY EXTRACT(YEAR FROM hire_date)
+)
+ORDER BY hire_year;
+
+-- 부서 내 이전 입사자
+SELECT last_name, department_id, hire_date,
+       LAG(last_name, 1, '(없음)') OVER(
+           PARTITION BY department_id ORDER BY hire_date) AS prev_hire
+FROM   employees WHERE department_id IS NOT NULL
+ORDER BY department_id, hire_date;` },
+
+  { title: '6. FIRST_VALUE, LAST_VALUE, NTH_VALUE', content: `파티션 또는 윈도우 내의 첫 번째, 마지막, n번째 행 값을 반환합니다.
+
+**함수 개요**
+| 함수 | 설명 |
+|------|------|
+| FIRST_VALUE(열) | 윈도우 첫 번째 행의 값 |
+| LAST_VALUE(열) | 윈도우 마지막 행의 값 |
+| NTH_VALUE(열, n) | 윈도우 n번째 행의 값 |
+
+**⚠️ LAST_VALUE 주의사항**
+기본 윈도우가 CURRENT ROW까지이므로 파티션의 마지막 값을 얻으려면 **ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING** 반드시 명시해야 합니다.
+
+**ORDER BY 방향으로 최대/최솟값 활용**
+- FIRST_VALUE + ORDER BY DESC = 파티션 내 최댓값
+- FIRST_VALUE + ORDER BY ASC = 파티션 내 최솟값`, code: `-- FIRST_VALUE: 부서 최고/최저 급여
+SELECT last_name, department_id, salary,
+       FIRST_VALUE(salary) OVER(
+           PARTITION BY department_id ORDER BY salary DESC
+           ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS dept_max,
+       FIRST_VALUE(salary) OVER(
+           PARTITION BY department_id ORDER BY salary ASC
+           ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS dept_min
+FROM   employees WHERE department_id IS NOT NULL;
+
+-- LAST_VALUE 올바른 사용 (UNBOUNDED FOLLOWING 필수)
+SELECT last_name, salary,
+       LAST_VALUE(salary) OVER(
+           PARTITION BY department_id ORDER BY salary
+           ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_val
+FROM   employees WHERE department_id = 60 ORDER BY salary;
+
+-- NTH_VALUE: 2위, 3위 급여
+SELECT last_name, salary,
+       NTH_VALUE(salary, 2) OVER(
+           PARTITION BY department_id ORDER BY salary DESC
+           ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS second,
+       NTH_VALUE(salary, 3) OVER(
+           PARTITION BY department_id ORDER BY salary DESC
+           ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS third
+FROM   employees WHERE department_id IS NOT NULL;` },
+
+  { title: '7. 분석 함수 종합 활용', content: `분석 함수를 결합하여 복잡한 비즈니스 분석을 수행합니다.
+
+**주요 패턴**
+
+1. **분석 결과 필터링**: 서브쿼리 또는 CTE 사용
+2. **GROUP BY + 분석 함수**: GROUP BY 후 집계 결과에 순위 부여
+3. **분포 분석**: NTILE + GROUP BY 조합
+4. **전기간 대비 분석**: LAG + 현재값 - 이전값
+5. **누적 비율**: 누적합 / 전체합 * 100
+
+**성능 고려사항**
+- 동일한 PARTITION BY/ORDER BY를 가진 여러 분석 함수는 하나의 정렬 작업으로 처리
+- PARTITION BY 열에 인덱스가 있으면 성능 향상 가능
+- 대용량 테이블에서는 PARTITION BY로 처리 범위를 제한하는 것이 효과적`, code: `-- 부서별 급여 상위 25%(1분위) 직원
+SELECT * FROM (
+    SELECT last_name, department_id, salary,
+           NTILE(4) OVER(PARTITION BY department_id
+                         ORDER BY salary DESC) AS quartile
+    FROM employees WHERE department_id IS NOT NULL
+)
+WHERE quartile = 1;
+
+-- 누적 급여 비율 80% 이내 직원 (파레토 분석)
+SELECT employee_id, last_name, salary, cum_pct
+FROM (
+    SELECT employee_id, last_name, salary,
+           ROUND(SUM(salary) OVER(ORDER BY salary DESC
+               ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+               / SUM(salary) OVER() * 100, 1) AS cum_pct
+    FROM employees
+)
+WHERE cum_pct <= 80;
+
+-- GROUP BY + 분석 함수: 부서별 합계에 순위 부여
+SELECT department_id,
+       SUM(salary) dept_total,
+       RANK() OVER(ORDER BY SUM(salary) DESC) dept_rank
+FROM   employees
+WHERE  department_id IS NOT NULL
+GROUP BY department_id;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -2979,6 +3267,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch10: CH10_SECTIONS,
   ch11: CH11_SECTIONS,
   ch12: CH12_SECTIONS,
+  ch13: CH13_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
