@@ -2764,6 +2764,208 @@ WHERE  object_type IN ('SYNONYM', 'SEQUENCE')
 ORDER BY object_type, object_name;` },
 ]
 
+const CH12_SECTIONS = [
+  { title: '1. 인덱스 개요', content: `인덱스(Index)는 테이블 열에 대한 빠른 검색을 지원하는 스키마 객체입니다. B-TREE 구조로 저장되어 전체 테이블 스캔 없이 원하는 행을 빠르게 찾을 수 있습니다.
+
+**인덱스가 효과적인 경우**
+| 조건 | 설명 |
+|------|------|
+| 대용량 테이블 | 수백만 건 이상 |
+| 소량 행 조회 | 전체의 2~4% 미만 |
+| 높은 카디널리티 | employee_id, email 같은 고유 값이 많은 열 |
+| 자주 사용하는 WHERE 조건 | JOIN, ORDER BY 열 포함 |
+
+**인덱스가 불필요한 경우**
+- 작은 테이블
+- 대부분의 행을 반환하는 쿼리
+- 카디널리티가 낮은 열 (성별, 상태 등)
+- DML이 매우 빈번한 열 (갱신 오버헤드)
+
+**인덱스의 단점**
+- DML(INSERT/UPDATE/DELETE) 시 자동 갱신 → 쓰기 성능 저하
+- 저장 공간 사용`, code: `-- USER_INDEXES: 인덱스 기본 정보
+SELECT index_name, table_name, uniqueness, index_type, status, visibility
+FROM   user_indexes
+WHERE  table_name = 'EMPLOYEES'
+ORDER BY index_name;
+
+-- USER_IND_COLUMNS: 인덱스별 열 정보
+SELECT index_name, column_name, column_position
+FROM   user_ind_columns
+WHERE  table_name = 'EMPLOYEES'
+ORDER BY index_name, column_position;
+
+-- 자동 생성 인덱스 확인 (PK/UK 제약)
+SELECT c.constraint_name, c.constraint_type,
+       i.index_name, i.uniqueness
+FROM   user_constraints c
+JOIN   user_indexes     i ON c.constraint_name = i.index_name
+WHERE  c.table_name = 'EMPLOYEES';` },
+
+  { title: '2. 인덱스 생성', content: `다양한 유형의 인덱스를 생성하는 방법을 알아봅니다.
+
+**기본 구문**
+\`\`\`sql
+CREATE [UNIQUE] INDEX index_name
+ON table_name (col1 [, col2, ...]);
+\`\`\`
+
+**인덱스 유형**
+| 유형 | 설명 | 예시 |
+|------|------|------|
+| 비고유(Non-Unique) | 중복 허용 (기본) | CREATE INDEX idx ON t(col) |
+| 고유(Unique) | 중복 불허 | CREATE UNIQUE INDEX idx ON t(col) |
+| 복합(Composite) | 여러 열 | CREATE INDEX idx ON t(col1, col2) |
+| 함수 기반 | 표현식 기반 | CREATE INDEX idx ON t(UPPER(col)) |
+
+**USING INDEX**: PK/UK 제약으로 자동 생성되는 인덱스 이름 직접 지정
+\`\`\`sql
+CREATE TABLE t (
+    id NUMBER PRIMARY KEY USING INDEX
+        (CREATE INDEX t_pk_idx ON t(id)),
+    name VARCHAR2(50)
+);
+\`\`\``, code: `-- 비고유 인덱스
+CREATE INDEX emp_last_name_idx ON employees(last_name);
+
+-- 고유 인덱스
+CREATE UNIQUE INDEX emp_email_idx ON employees(email);
+
+-- 복합 인덱스 (선두 열 설계 중요)
+CREATE INDEX emp_dept_job_idx ON employees(department_id, job_id);
+
+-- 함수 기반 인덱스 (대소문자 무관 검색)
+CREATE INDEX emp_upper_last_idx ON employees(UPPER(last_name));
+
+-- PK 인덱스 이름 직접 지정
+CREATE TABLE new_emp (
+    id   NUMBER PRIMARY KEY USING INDEX
+         (CREATE INDEX new_emp_pk_idx ON new_emp(id)),
+    name VARCHAR2(50)
+);` },
+
+  { title: '3. 복합 인덱스와 함수 기반 인덱스', content: `복합 인덱스와 함수 기반 인덱스의 특성과 활용 방법입니다.
+
+**복합 인덱스 (Composite Index)**
+- 여러 열을 조합하여 생성
+- **선두 열 원칙**: 조건절에 선두 열이 포함되어야 인덱스 효과적
+- 열 순서가 중요: 가장 자주 필터링하는 열을 선두에
+
+| 조건 | (dept_id, job_id) 인덱스 활용 여부 |
+|------|-----------------------------------|
+| WHERE dept_id = 80 | O (선두 열) |
+| WHERE dept_id = 80 AND job_id = 'SA_REP' | O (두 열 모두) |
+| WHERE job_id = 'SA_REP' | X (선두 열 없음) |
+
+**함수 기반 인덱스 (Function-Based Index)**
+- 열에 함수를 적용한 결과를 인덱스로 저장
+- WHERE 절의 함수 표현식과 정확히 일치해야 활용
+- USER_INDEXES.INDEX_TYPE = 'FUNCTION-BASED NORMAL'
+- 표현식은 USER_IND_EXPRESSIONS에서 확인`, code: `-- 복합 인덱스 생성
+CREATE INDEX emp_dept_job_idx ON employees(department_id, job_id);
+
+-- 선두 열 포함 → 인덱스 활용
+SELECT * FROM employees WHERE department_id = 80 AND job_id = 'SA_REP';
+SELECT * FROM employees WHERE department_id = 80;
+
+-- 선두 열 없음 → 인덱스 미활용
+SELECT * FROM employees WHERE job_id = 'SA_REP';
+
+-- 함수 기반 인덱스
+CREATE INDEX emp_upper_last_idx ON employees(UPPER(last_name));
+
+-- 인덱스 활용 (함수 표현식 일치)
+SELECT * FROM employees WHERE UPPER(last_name) = 'KING';
+
+-- 인덱스 미활용 (함수 없음)
+SELECT * FROM employees WHERE last_name = 'King';
+
+-- 함수 기반 인덱스 표현식 확인
+SELECT index_name, column_expression
+FROM   user_ind_expressions
+WHERE  index_name = 'EMP_UPPER_LAST_IDX';` },
+
+  { title: '4. 인덱스 관리', content: `인덱스의 수정, 재구성, INVISIBLE/VISIBLE 관리 방법입니다.
+
+**ALTER INDEX**
+| 명령 | 설명 |
+|------|------|
+| ALTER INDEX idx REBUILD | 인덱스 재구성 (단편화 해소) |
+| ALTER INDEX idx INVISIBLE | 옵티마이저가 사용 안 함 (구조 유지) |
+| ALTER INDEX idx VISIBLE | 옵티마이저가 다시 사용 |
+
+**INVISIBLE 인덱스 활용 시나리오**
+1. 기존 인덱스를 INVISIBLE로 설정
+2. 새 인덱스 생성 후 성능 비교
+3. 새 인덱스가 더 좋으면 기존 인덱스 DROP
+4. 기존이 더 좋으면 새 인덱스 DROP + INVISIBLE 해제
+
+**인덱스 삭제**
+- DROP INDEX 인덱스명
+- 테이블 DROP 시 인덱스도 자동 삭제
+- PK/UK 제약 삭제 시 자동 생성 인덱스도 삭제`, code: `-- 인덱스 재구성 (단편화 해소)
+ALTER INDEX emp_last_name_idx REBUILD;
+
+-- INVISIBLE: 옵티마이저 무시, 구조 유지
+ALTER INDEX emp_dept_job_idx INVISIBLE;
+
+-- VISIBLE: 다시 옵티마이저 사용
+ALTER INDEX emp_dept_job_idx VISIBLE;
+
+-- 상태 확인
+SELECT index_name, visibility, status
+FROM   user_indexes
+WHERE  table_name = 'EMPLOYEES';
+
+-- 인덱스 삭제
+DROP INDEX emp_last_name_idx;
+DROP INDEX emp_upper_last_idx;
+
+-- 테이블 DROP 시 인덱스도 자동 삭제됨
+DROP TABLE test_tbl;  -- test_tbl의 모든 인덱스 자동 삭제` },
+
+  { title: '5. 딕셔너리 뷰와 인덱스 전략', content: `인덱스 관련 딕셔너리 뷰와 최적 인덱스 설계 전략입니다.
+
+**인덱스 관련 딕셔너리 뷰**
+| 뷰 | 설명 |
+|----|------|
+| USER_INDEXES | 인덱스 기본 정보 (이름, 테이블, 타입, 고유여부, 가시성) |
+| USER_IND_COLUMNS | 인덱스별 열 이름과 위치 |
+| USER_IND_EXPRESSIONS | 함수 기반 인덱스 표현식 |
+
+**인덱스 설계 원칙**
+1. **선택도 높은 열**: employee_id, email 같은 고유 값이 많은 열
+2. **자주 사용하는 WHERE/JOIN/ORDER BY 열**
+3. **복합 인덱스**: 가장 선택적인 열을 선두에
+4. **BITMAP 인덱스**: 카디널리티가 낮고 DML이 적은 열 (DW/분석 환경)
+5. **적정 수 유지**: DML 성능 저하를 고려
+
+**EXPLAIN PLAN으로 인덱스 활용 확인**
+\`\`\`sql
+EXPLAIN PLAN FOR SELECT * FROM ...;
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
+\`\`\``, code: `-- 인덱스 종합 현황 조회
+SELECT i.index_name, i.uniqueness, i.index_type,
+       i.visibility, i.status,
+       LISTAGG(c.column_name, ', ')
+           WITHIN GROUP (ORDER BY c.column_position) AS columns
+FROM   user_indexes     i
+JOIN   user_ind_columns c ON i.index_name = c.index_name
+WHERE  i.table_name = 'EMPLOYEES'
+GROUP BY i.index_name, i.uniqueness, i.index_type, i.visibility, i.status
+ORDER BY i.index_name;
+
+-- EXPLAIN PLAN으로 인덱스 활용 확인
+EXPLAIN PLAN FOR
+SELECT * FROM employees WHERE last_name = 'King';
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
+
+-- DICTIONARY에서 인덱스 관련 뷰 검색
+SELECT table_name, comments FROM dictionary
+WHERE  table_name LIKE '%INDEX%'
+ORDER BY table_name;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -2776,6 +2978,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch09: CH09_SECTIONS,
   ch10: CH10_SECTIONS,
   ch11: CH11_SECTIONS,
+  ch12: CH12_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
