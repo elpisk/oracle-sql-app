@@ -1499,12 +1499,338 @@ GROUP BY c.country_name
 ORDER BY 직원수 DESC;` },
 ]
 
+const CH06_SECTIONS = [
+  { title: '1. 서브쿼리 개요', content: `서브쿼리(Subquery)는 다른 SQL 문 안에 중첩된 SELECT 문입니다. 괄호로 감싸야 하며, 외부 쿼리(메인 쿼리)에 필요한 값을 제공합니다.
+
+**서브쿼리 분류**
+| 기준 | 종류 | 특징 |
+|------|------|------|
+| 반환 행 수 | 단일행 | 1행 반환, =/>/<와 사용 |
+| | 다중행 | 0~N행 반환, IN/ANY/ALL/EXISTS와 사용 |
+| 사용 위치 | WHERE/HAVING | 조건 필터링 |
+| | FROM (인라인 뷰) | 임시 테이블처럼 사용 |
+| | SELECT (스칼라) | 1행 1컬럼 반환 |
+| 외부 참조 | 비상관 | 독립 실행 가능 |
+| | 상관 | 외부 쿼리 컬럼 참조, 행마다 실행 |
+
+**서브쿼리 사용 규칙**
+- 반드시 괄호로 감싸야 함
+- 단일행 연산자와 사용하는 서브쿼리는 반드시 1행만 반환
+- 일반적으로 서브쿼리에서는 ORDER BY 미사용 (인라인 뷰 예외)`, code: `-- 서브쿼리 기본 구조: 평균보다 높은 급여 직원
+SELECT last_name, salary
+FROM   employees
+WHERE  salary > (SELECT AVG(salary)    -- 서브쿼리
+                 FROM   employees);    -- 결과: 6461.83
+
+-- 서브쿼리 실행 순서: 서브쿼리 먼저 → 외부 쿼리
+-- 1) SELECT AVG(salary) FROM employees → 6461.83
+-- 2) WHERE salary > 6461.83 로 필터링` },
+
+  { title: '2. 단일행 서브쿼리', content: `단일행 서브쿼리는 정확히 1행 1컬럼을 반환합니다. 단일행 비교 연산자(=, >, <, >=, <=, <>)와 함께 사용합니다.
+
+**주의사항**
+- 서브쿼리가 0행 반환 → 비교 값 = NULL → 조건 FALSE (결과 0행)
+- 서브쿼리가 2행 이상 반환 → ORA-01427 오류
+
+**HAVING 절에서도 사용 가능**
+- HAVING AVG(salary) > (SELECT AVG(salary) FROM employees)
+
+**WHERE, HAVING 모두 단일행 서브쿼리 지원**`, code: `-- Abel과 같은 부서의 직원 조회
+SELECT last_name, department_id
+FROM   employees
+WHERE  department_id = (SELECT department_id
+                        FROM   employees
+                        WHERE  last_name = 'Abel');
+
+-- 최고 급여자 조회
+SELECT last_name, salary
+FROM   employees
+WHERE  salary = (SELECT MAX(salary) FROM employees);
+
+-- HAVING에서 서브쿼리: 전체 평균보다 높은 부서
+SELECT department_id, ROUND(AVG(salary), 2) AS 평균급여
+FROM   employees
+GROUP BY department_id
+HAVING AVG(salary) > (SELECT AVG(salary) FROM employees)
+ORDER BY AVG(salary) DESC;` },
+
+  { title: '3. 다중행 서브쿼리 — IN / ANY / ALL', content: `다중행 서브쿼리는 0~N행을 반환합니다. IN, ANY, ALL, EXISTS 연산자와 함께 사용합니다.
+
+**IN / NOT IN**
+- IN: 목록 중 하나라도 일치
+- NOT IN: 목록에 없는 경우 (NULL 포함 시 주의!)
+
+**ANY / ALL**
+| 연산자 | 의미 |
+|--------|------|
+| >ANY | 최솟값보다 큼 |
+| <ANY | 최댓값보다 작음 |
+| =ANY | IN과 동일 |
+| >ALL | 최댓값보다 큼 |
+| <ALL | 최솟값보다 작음 |
+| <>ALL | NOT IN과 동일 |
+
+**NOT IN + NULL 함정**
+서브쿼리 결과에 NULL이 포함되면 NOT IN 전체 결과가 0행이 됩니다. NOT EXISTS로 대체하거나, 서브쿼리에 WHERE col IS NOT NULL 추가합니다.`, code: `-- IN: Seattle 위치 부서 직원
+SELECT last_name, department_id
+FROM   employees
+WHERE  department_id IN (
+         SELECT department_id
+         FROM   departments d JOIN locations l ON d.location_id = l.location_id
+         WHERE  l.city = 'Seattle');
+
+-- >ANY: 부서 20,50의 최솟값보다 높은 직원
+SELECT last_name, salary FROM employees
+WHERE  salary > ANY (SELECT salary FROM employees WHERE department_id IN (20, 50));
+
+-- >ALL: 부서 20,50의 최댓값보다 높은 직원
+SELECT last_name, salary FROM employees
+WHERE  salary > ALL (SELECT salary FROM employees WHERE department_id IN (20, 50));
+
+-- NOT IN + NULL 안전 처리
+SELECT last_name FROM employees
+WHERE  department_id NOT IN (
+         SELECT department_id FROM employees
+         WHERE  commission_pct IS NOT NULL
+         AND    department_id IS NOT NULL);  -- NULL 제거 필수!` },
+
+  { title: '4. EXISTS · NOT EXISTS · 상관 서브쿼리', content: `**상관 서브쿼리 (Correlated Subquery)**
+외부 쿼리의 컬럼을 참조하며, 외부 쿼리 행마다 한 번씩 실행됩니다.
+
+**EXISTS / NOT EXISTS**
+- EXISTS: 서브쿼리가 1행 이상 반환 → TRUE
+- NOT EXISTS: 서브쿼리가 0행 반환 → TRUE
+- 값이 아닌 존재 여부만 확인 → NULL 안전
+
+**EXISTS vs IN 비교**
+| 항목 | EXISTS | IN |
+|------|--------|----|
+| NULL 처리 | 안전 | NULL 포함 시 위험 |
+| 대용량 | 유리 (즉시 중단) | 전체 목록 생성 |
+| 용도 | 존재 여부 확인 | 값 목록 비교 |
+
+**NOT EXISTS가 NOT IN보다 안전한 이유**
+NOT EXISTS는 값을 비교하지 않으므로 NULL의 영향을 받지 않습니다.`, code: `-- EXISTS: 부하 직원이 있는 관리자 조회
+SELECT employee_id, last_name, job_id
+FROM   employees mgr
+WHERE  EXISTS (SELECT 1
+               FROM   employees sub
+               WHERE  sub.manager_id = mgr.employee_id);
+
+-- NOT EXISTS: 직원이 없는 부서 조회 (NULL 안전)
+SELECT department_id, department_name
+FROM   departments d
+WHERE  NOT EXISTS (SELECT 1
+                   FROM   employees e
+                   WHERE  e.department_id = d.department_id);
+
+-- 상관 서브쿼리: 부서 평균보다 높은 급여 직원
+SELECT last_name, salary, department_id
+FROM   employees e_outer
+WHERE  salary > (SELECT AVG(salary)
+                 FROM   employees e_inner
+                 WHERE  e_inner.department_id = e_outer.department_id);` },
+
+  { title: '5. 인라인 뷰와 Top-N 쿼리', content: `**인라인 뷰 (Inline View)**
+FROM 절에 작성하는 서브쿼리로, 임시 테이블처럼 사용합니다. 반드시 별칭이 필요합니다.
+
+**Oracle Top-N 쿼리 패턴**
+ROWNUM은 행이 반환되기 전에 부여됩니다. ORDER BY와 같이 쓰면 정렬 전에 ROWNUM이 부여되어 잘못된 결과가 나옵니다.
+
+올바른 Top-N 방법:
+1. 인라인 뷰에서 ORDER BY로 정렬
+2. 외부 쿼리에서 WHERE ROWNUM <= N
+
+**Oracle 12c+ FETCH 문법**
+\`\`\`sql
+SELECT ... FROM ... ORDER BY col
+FETCH FIRST N ROWS ONLY;
+FETCH FIRST N PERCENT ROWS ONLY;
+OFFSET N ROWS FETCH NEXT M ROWS ONLY;  -- 페이징
+\`\`\``, code: `-- Top-5 급여 직원 (ROWNUM 기반)
+SELECT last_name, salary
+FROM  (SELECT last_name, salary
+       FROM   employees
+       ORDER BY salary DESC)
+WHERE  ROWNUM <= 5;
+
+-- 잘못된 방법 (ROWNUM이 정렬 전에 적용됨)
+-- SELECT last_name, salary FROM employees
+-- WHERE ROWNUM <= 5 ORDER BY salary DESC;  -- 틀림!
+
+-- 인라인 뷰: 부서 평균 급여와 JOIN
+SELECT e.last_name, e.salary, ROUND(d.avg_sal, 2) AS 부서평균
+FROM   employees e
+JOIN  (SELECT department_id, AVG(salary) AS avg_sal
+       FROM   employees GROUP BY department_id) d
+    ON  e.department_id = d.department_id
+WHERE  e.salary > d.avg_sal;
+
+-- ROWNUM 기반 페이징 (4~6번째 행)
+SELECT last_name, hire_date, rn
+FROM  (SELECT last_name, hire_date, ROWNUM rn
+       FROM  (SELECT last_name, hire_date FROM employees ORDER BY hire_date))
+WHERE  rn BETWEEN 4 AND 6;` },
+
+  { title: '6. WITH 절(CTE)과 다중컬럼 서브쿼리', content: `**WITH 절 (CTE: Common Table Expression)**
+반복 사용되는 서브쿼리에 이름을 부여하여 재사용합니다.
+
+\`\`\`sql
+WITH cte1 AS (SELECT ...),
+     cte2 AS (SELECT ...)
+SELECT ... FROM cte1 JOIN cte2 ...
+\`\`\`
+
+재귀 WITH 절도 지원합니다(UNION ALL).
+
+**다중컬럼 서브쿼리**
+두 개 이상의 컬럼을 동시에 비교합니다.
+
+- **쌍 비교 (Pairwise)**: (col1, col2) IN (SELECT col1, col2 FROM ...)
+  → 두 컬럼의 조합이 정확히 일치해야 함
+- **비쌍 비교 (Non-Pairwise)**: col1 IN (...) AND col2 IN (...)
+  → 각 컬럼을 독립적으로 비교, 의도치 않은 조합 포함 가능`, code: `-- WITH 절: 부서 통계 + 전체 평균 비교
+WITH dept_avg AS (
+  SELECT department_id, AVG(salary) AS avg_sal
+  FROM   employees GROUP BY department_id
+),
+total_avg AS (
+  SELECT AVG(salary) AS total FROM employees
+)
+SELECT d.department_id,
+       ROUND(d.avg_sal, 2) AS 부서평균,
+       ROUND(t.total, 2)   AS 전체평균
+FROM   dept_avg d CROSS JOIN total_avg t
+WHERE  d.avg_sal > t.total
+ORDER BY d.avg_sal DESC;
+
+-- 다중컬럼 쌍 비교: 각 부서 최저 급여자
+SELECT last_name, department_id, salary
+FROM   employees
+WHERE  (department_id, salary) IN (
+         SELECT department_id, MIN(salary)
+         FROM   employees
+         GROUP BY department_id)
+ORDER BY department_id;` },
+]
+
+const CH07_SECTIONS = [
+  { title: '1. 집합 연산자란?', content: `집합 연산자(Set Operator)는 두 개 이상의 SELECT 문의 결과를 하나로 합치는 연산자입니다. 수학의 집합 연산(합집합, 교집합, 차집합)과 동일한 개념입니다.
+
+**집합 연산자 종류**
+| 연산자 | 의미 | 중복 처리 |
+|--------|------|-----------|
+| UNION | 합집합 | 중복 제거 |
+| UNION ALL | 합집합 | 중복 포함 |
+| INTERSECT | 교집합 | 중복 제거 |
+| MINUS | 차집합 | 중복 제거 |
+
+**사용 규칙**
+1. SELECT 목록의 **열 개수가 일치**해야 함
+2. 대응되는 열의 **데이터 타입이 호환**되어야 함
+3. **ORDER BY** 절은 복합 쿼리 맨 끝에 한 번만 사용
+4. 결과의 **열 이름은 첫 번째 SELECT** 쿼리 기준`, code: `-- 집합 연산자 기본 구문
+SELECT column1, column2
+FROM   table1
+UNION | UNION ALL | INTERSECT | MINUS
+SELECT column1, column2
+FROM   table2
+[ORDER BY column1];` },
+
+  { title: '2. UNION / UNION ALL', content: `**UNION**: 두 쿼리의 합집합, 중복 제거
+**UNION ALL**: 두 쿼리의 합집합, 중복 포함
+
+UNION ALL은 중복 제거를 위한 정렬 작업이 없으므로 UNION보다 빠릅니다.
+
+**UNION vs UNION ALL 비교**
+| 항목 | UNION | UNION ALL |
+|------|-------|-----------|
+| 중복 제거 | O | X |
+| 정렬 | 기본 오름차순 | 없음 |
+| 성능 | 느림 | 빠름 |
+
+> **권장:** 두 쿼리 결과에 중복이 없음을 확신할 때는 UNION ALL 사용`, code: `-- UNION: 현재 직무 + 과거 직무 고유 목록
+SELECT job_id
+FROM   employees
+UNION
+SELECT job_id
+FROM   job_history
+ORDER BY job_id;
+
+-- UNION ALL: 중복 포함 전체 목록 (107 + 10 = 117행)
+SELECT job_id
+FROM   employees
+UNION ALL
+SELECT job_id
+FROM   job_history
+ORDER BY job_id;` },
+
+  { title: '3. INTERSECT / MINUS', content: `**INTERSECT (교집합)**: 두 쿼리 결과에 공통으로 존재하는 행만 반환
+
+**MINUS (차집합)**: 첫 번째 쿼리 결과에서 두 번째 쿼리 결과에 있는 행을 제거
+
+> **MINUS 주의사항:** NOT IN 서브쿼리에 NULL이 포함되면 0행이 반환될 수 있지만, MINUS는 NULL을 안전하게 처리합니다.`, code: `-- INTERSECT: 현직무와 과거직무가 동일한 사원
+SELECT employee_id, job_id
+FROM   employees
+INTERSECT
+SELECT employee_id, job_id
+FROM   job_history;
+-- 결과: 176, SA_REP (1행)
+
+-- MINUS: 직무 변경 이력이 없는 사원
+SELECT employee_id FROM employees
+MINUS
+SELECT employee_id FROM job_history
+ORDER BY employee_id;
+-- 결과: 97행
+
+-- MINUS: 빈 부서 목록 (사원 없는 부서)
+SELECT department_id FROM departments
+MINUS
+SELECT department_id FROM employees
+WHERE  department_id IS NOT NULL
+ORDER BY department_id;
+-- 결과: 120~270 (16개 빈 부서)` },
+
+  { title: '4. 열 일치 · ORDER BY · 우선순위', content: `**열 개수/타입 불일치 시 NULL 변환 사용**
+없는 열 자리에 TO_CHAR(NULL), TO_DATE(NULL), 0 등으로 채워 맞춤
+
+**ORDER BY 규칙**
+- 복합 쿼리 맨 끝에 한 번만 작성
+- 첫 번째 SELECT 쿼리의 열 이름 또는 별칭 사용
+- 열 위치 번호(ORDER BY 2) 사용 가능
+
+**집합 연산자 우선순위 (Oracle)**
+INTERSECT > UNION = UNION ALL = MINUS
+→ 명시적 괄호로 순서를 제어하는 것이 권장됩니다.`, code: `-- 열 타입 불일치 시 NULL 변환
+SELECT location_id, department_name "Name", TO_CHAR(NULL) "City"
+FROM   departments
+UNION
+SELECT location_id, TO_CHAR(NULL) "Name", city
+FROM   locations
+ORDER BY location_id;
+
+-- ORDER BY 열 번호: salary(3번째 열) 내림차순
+SELECT 'A' AS grp, employee_id, salary
+FROM   employees WHERE department_id = 90
+UNION ALL
+SELECT 'B', employee_id, salary
+FROM   employees WHERE department_id = 80
+ORDER BY 3 DESC;
+
+-- 우선순위 주의: INTERSECT가 UNION보다 먼저 처리됨
+-- A UNION B INTERSECT C → A UNION (B INTERSECT C)
+-- 의도한 순서가 다를 경우 괄호 사용 필수` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
   ch03: CH03_SECTIONS,
   ch04: CH04_SECTIONS,
   ch05: CH05_SECTIONS,
+  ch06: CH06_SECTIONS,
+  ch07: CH07_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
