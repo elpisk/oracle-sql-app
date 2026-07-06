@@ -2398,6 +2398,201 @@ ROLLBACK;  -- 효과 없음 (이미 커밋됨)
 \`\`\`` },
 ]
 
+const CH10_SECTIONS = [
+  { title: '1. 뷰 개요', content: `뷰(View)는 하나 이상의 테이블 또는 다른 뷰를 기반으로 하는 가상 테이블입니다. 데이터를 저장하지 않고 쿼리 정의만 저장합니다.
+
+**뷰의 장점**
+| 장점 | 설명 |
+|------|------|
+| 데이터 보안 | 민감한 열(급여 등)을 숨길 수 있음 |
+| 쿼리 단순화 | 복잡한 JOIN을 뷰로 캡슐화 |
+| 데이터 독립성 | 테이블 구조 변경 시 애플리케이션 보호 |
+| 논리적 구조 | 동일 데이터를 다양한 관점으로 표현 |
+
+**단순 뷰 vs 복합 뷰**
+| 항목 | 단순 뷰 | 복합 뷰 |
+|------|---------|---------|
+| 기반 테이블 | 1개 | 여러 개 가능 |
+| 함수·그룹 | 없음 | 포함 가능 |
+| DML | 가능 | 제한적 |`, code: `-- 뷰 생성 기본 구문
+CREATE [OR REPLACE] [FORCE|NOFORCE] VIEW view_name
+  [(alias1, alias2, ...)]
+AS subquery
+[WITH CHECK OPTION [CONSTRAINT constraint_name]]
+[WITH READ ONLY [CONSTRAINT constraint_name]];
+
+-- 단순 뷰 생성 예시
+CREATE VIEW empvu80 AS
+SELECT employee_id, last_name, salary
+FROM   employees
+WHERE  department_id = 80;
+
+-- 뷰 조회 (테이블처럼 사용)
+SELECT * FROM empvu80;` },
+
+  { title: '2. 뷰 생성 옵션', content: `CREATE VIEW에서 사용할 수 있는 주요 옵션들입니다.
+
+**OR REPLACE**
+- 기존 뷰가 있으면 재정의 (DROP 없이)
+- 기존에 부여된 권한 유지
+- 운영 환경에서 안전한 방법
+
+**FORCE / NOFORCE**
+| 옵션 | 설명 |
+|------|------|
+| NOFORCE (기본) | 기반 테이블이 존재해야 생성 가능 |
+| FORCE | 기반 테이블 없어도 강제 생성 (INVALID 상태) |
+
+**열 별칭 지정 방법**
+1. 서브쿼리 내 별칭: SELECT salary*12 ANN_SAL ...
+2. 뷰 이름 뒤 괄호: CREATE VIEW v (id, name, sal) AS SELECT ...`, code: `-- OR REPLACE: 기존 권한 유지하며 재정의
+CREATE OR REPLACE VIEW empvu80 AS
+SELECT employee_id, last_name, salary, department_id
+FROM   employees WHERE department_id = 80;
+
+-- 열 별칭 방법 1: 서브쿼리 내
+CREATE VIEW salvu50 AS
+SELECT employee_id ID_NUMBER, last_name NAME, salary*12 ANN_SALARY
+FROM   employees WHERE department_id = 50;
+
+-- 열 별칭 방법 2: 뷰 이름 뒤 괄호
+CREATE OR REPLACE VIEW empvu80 (id_number, name, sal, dept_id)
+AS SELECT employee_id, first_name||' '||last_name, salary, department_id
+   FROM   employees WHERE department_id = 80;
+
+-- FORCE: 기반 테이블 없어도 생성 (INVALID 상태)
+CREATE FORCE VIEW ghost_vu AS
+SELECT id, name FROM ghost_table;
+
+-- STATUS 확인
+SELECT object_name, status FROM user_objects WHERE object_name = 'GHOST_VU';` },
+
+  { title: '3. 뷰를 통한 DML', content: `뷰를 통해 INSERT/UPDATE/DELETE를 수행할 수 있지만, 제한 조건이 있습니다.
+
+**DML 불가 조건**
+| 조건 | INSERT | UPDATE | DELETE |
+|------|--------|--------|--------|
+| 그룹 함수 | ✗ | ✗ | ✗ |
+| GROUP BY | ✗ | ✗ | ✗ |
+| DISTINCT | ✗ | ✗ | ✗ |
+| ROWNUM | ✗ | ✗ | ✗ |
+| 표현식 열 | ✗ | ✗ | 가능 |
+| JOIN (복합) | ✗ | 키 보존 테이블만 | 키 보존만 |
+
+**⚠️ 사라지는 행(Disappearing Rows)**
+WITH CHECK OPTION이 없는 뷰에서 뷰 조건 밖의 행을 삽입/수정하면 기반 테이블에는 저장되지만 뷰에서는 보이지 않게 됩니다.`, code: `-- 단순 뷰에서 DML 가능
+UPDATE empvu80 SET salary = 8000 WHERE employee_id = 100;
+DELETE FROM empvu80 WHERE employee_id = 101;
+INSERT INTO empvu80 VALUES (300, 'Kim', 7000);  -- 필수 열 모두 제공 필요
+
+-- 표현식 열이 있는 뷰에서 INSERT 불가
+CREATE OR REPLACE VIEW emp_expr_vu AS
+SELECT employee_id, last_name, salary * 12 annual_sal
+FROM   employees;
+
+INSERT INTO emp_expr_vu VALUES (600, 'Lee', 96000);
+-- ORA-01733: virtual column not allowed here
+
+-- GROUP BY 뷰에서 DML 불가
+CREATE OR REPLACE VIEW dept_sal_vu AS
+SELECT department_id, AVG(salary) avg_sal
+FROM   employees GROUP BY department_id;
+
+DELETE FROM dept_sal_vu WHERE department_id = 80;
+-- ORA-01732: data manipulation operation not legal on this view` },
+
+  { title: '4. WITH CHECK OPTION / WITH READ ONLY', content: `뷰의 DML을 제어하는 두 가지 옵션입니다.
+
+**WITH CHECK OPTION**
+- 뷰의 WHERE 조건을 벗어나는 DML 차단
+- INSERT와 UPDATE 모두 적용
+- 위반 시: ORA-01402: view WITH CHECK OPTION where-clause violation
+- CONSTRAINT 이름 지정으로 오류 메시지에 이름 표시 가능
+
+**WITH READ ONLY**
+- 뷰를 통한 모든 DML(INSERT/UPDATE/DELETE) 차단
+- SELECT는 정상 허용
+- 위반 시: ORA-42399
+
+| 옵션 | INSERT | UPDATE | DELETE | SELECT |
+|------|--------|--------|--------|--------|
+| 없음 | 뷰 조건 밖도 가능 | 가능 | 가능 | 가능 |
+| WITH CHECK OPTION | 조건 내만 | 조건 내만 | 가능 | 가능 |
+| WITH READ ONLY | ✗ | ✗ | ✗ | 가능 |`, code: `-- WITH CHECK OPTION: 조건 밖 DML 차단
+CREATE OR REPLACE VIEW empvu20 AS
+SELECT employee_id, last_name, salary, department_id
+FROM   employees WHERE department_id = 20
+WITH CHECK OPTION CONSTRAINT empvu20_ck;
+
+-- 위반 시 오류 발생
+INSERT INTO empvu20 (employee_id, last_name, email, hire_date, job_id, department_id)
+VALUES (500, 'Test', 'TEST', SYSDATE, 'MK_REP', 30);
+-- ORA-01402: view WITH CHECK OPTION where-clause violation
+
+-- 정상 삽입 (조건 충족)
+INSERT INTO empvu20 (employee_id, last_name, email, hire_date, job_id, department_id)
+VALUES (501, 'Good', 'GOOD', SYSDATE, 'MK_REP', 20);
+
+-- WITH READ ONLY: 모든 DML 차단
+CREATE OR REPLACE VIEW empvu10 (employee_number, employee_name, job_title)
+AS SELECT employee_id, last_name, job_id
+   FROM   employees WHERE department_id = 10
+WITH READ ONLY;
+
+DELETE FROM empvu10 WHERE employee_number = 200;
+-- ORA-42399: cannot perform a DML operation on a read-only view` },
+
+  { title: '5. 뷰 관리와 데이터 딕셔너리', content: `뷰의 삭제, 상태 확인, 딕셔너리 조회 방법입니다.
+
+**뷰 삭제**
+\`\`\`sql
+DROP VIEW view_name;
+\`\`\`
+- 기반 테이블과 데이터는 영향 없음
+- 다른 사용자의 뷰 삭제: DROP ANY VIEW 권한 필요
+
+**USER_VIEWS 딕셔너리 뷰**
+| 컬럼 | 설명 |
+|------|------|
+| VIEW_NAME | 뷰 이름 |
+| TEXT | 뷰 정의 서브쿼리 |
+| READ_ONLY | WITH READ ONLY 여부 (Y/N) |
+
+**뷰 상태 (INVALID)**
+- 기반 테이블이 삭제/변경되면 뷰가 INVALID 상태
+- USER_OBJECTS.STATUS로 확인
+- ALTER VIEW 뷰명 COMPILE; 로 재컴파일
+
+**뷰 기반 뷰 (Nested View)**
+- 뷰를 기반으로 또 다른 뷰를 생성 가능
+- 기반 뷰 삭제 시 상위 뷰도 INVALID`, code: `-- 뷰 삭제
+DROP VIEW empvu80;
+
+-- 뷰 목록 조회
+SELECT view_name FROM user_views;
+
+-- 뷰 서브쿼리 확인
+SELECT text FROM user_views WHERE view_name = 'EMPVU80';
+
+-- 뷰 구조 확인
+DESCRIBE empvu80;
+
+-- 뷰 상태 확인
+SELECT object_name, status
+FROM   user_objects
+WHERE  object_type = 'VIEW';
+
+-- 뷰 기반 뷰
+CREATE VIEW high_sal_vu AS
+SELECT employee_id, last_name, salary, department_id
+FROM   employees WHERE salary > 5000;
+
+CREATE VIEW dept80_high_sal_vu AS
+SELECT * FROM high_sal_vu WHERE department_id = 80;
+
+SELECT * FROM dept80_high_sal_vu;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -2408,6 +2603,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch07: CH07_SECTIONS,
   ch08: CH08_SECTIONS,
   ch09: CH09_SECTIONS,
+  ch10: CH10_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
