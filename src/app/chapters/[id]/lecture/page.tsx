@@ -1062,10 +1062,199 @@ FROM   employees
 WHERE  ROWNUM <= 5;` },
 ]
 
+const CH04_SECTIONS = [
+  { title: '1. 그룹 함수 개요', content: `그룹 함수(집계 함수)는 여러 행을 하나의 결과로 집계합니다. Oracle에서는 GROUP BY와 함께 사용하여 데이터를 요약합니다.
+
+**주요 그룹 함수**
+| 함수 | 설명 | NULL 처리 |
+|------|------|-----------|
+| COUNT(*) | 전체 행 수 | NULL 포함 |
+| COUNT(col) | 컬럼 값 있는 행 수 | NULL 제외 |
+| SUM(col) | 합계 | NULL 무시 |
+| AVG(col) | 평균 | NULL 무시 |
+| MAX(col) | 최댓값 | NULL 무시 |
+| MIN(col) | 최솟값 | NULL 무시 |
+
+**중요:** 그룹 함수는 NULL 값을 자동으로 무시합니다. AVG(commission_pct)는 NULL이 아닌 행들의 평균만 계산합니다.
+
+**COUNT(*) vs COUNT(column)**
+- COUNT(*): NULL 포함 모든 행 카운트
+- COUNT(column): NULL이 아닌 행만 카운트
+- COUNT(DISTINCT column): 중복 제거 후 카운트`, code: `-- 전체 직원 통계 (GROUP BY 없음 = 전체가 하나의 그룹)
+SELECT COUNT(*)                    AS 전체직원수,
+       COUNT(commission_pct)        AS 커미션보유수,
+       ROUND(AVG(salary), 2)        AS 평균급여,
+       SUM(salary)                  AS 급여합계,
+       MAX(salary)                  AS 최고급여,
+       MIN(hire_date)               AS 최초입사일
+FROM   employees;
+
+-- NULL 처리 비교: AVG vs AVG(NVL)
+SELECT ROUND(AVG(commission_pct),       4) AS NULL_제외_평균,
+       ROUND(AVG(NVL(commission_pct,0)), 4) AS NULL_0포함_평균
+FROM   employees;` },
+
+  { title: '2. GROUP BY 절', content: `GROUP BY는 지정한 컬럼의 고유한 값(또는 조합)마다 하나의 그룹을 생성합니다.
+
+**핵심 규칙**
+- SELECT에 그룹 함수 + 일반 컬럼을 함께 쓰면 일반 컬럼은 반드시 GROUP BY에 포함
+- GROUP BY에서 SELECT 별칭 사용 불가 (GROUP BY가 SELECT보다 먼저 실행)
+- GROUP BY에 NULL 값도 하나의 그룹으로 처리됨
+
+**SQL 실행 순서**
+\`\`\`
+FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY
+\`\`\`
+
+**ORA-00979** 오류: SELECT의 비집계 컬럼이 GROUP BY에 없을 때 발생합니다.`, code: `-- 부서별 직원 수와 평균 급여
+SELECT department_id,
+       COUNT(*)             AS 직원수,
+       ROUND(AVG(salary),2) AS 평균급여
+FROM   employees
+GROUP BY department_id
+ORDER BY department_id;
+
+-- 부서·직무 조합별 집계 (두 컬럼 모두 GROUP BY에 포함)
+SELECT department_id,
+       job_id,
+       COUNT(*) AS 직원수,
+       SUM(salary) AS 급여합계
+FROM   employees
+GROUP BY department_id, job_id
+ORDER BY department_id, job_id;
+
+-- 입사 연도별 입사자 수
+SELECT TO_CHAR(hire_date, 'YYYY') AS 입사연도,
+       COUNT(*)                    AS 입사자수
+FROM   employees
+GROUP BY TO_CHAR(hire_date, 'YYYY')
+ORDER BY 입사연도;` },
+
+  { title: '3. HAVING 절', content: `HAVING은 GROUP BY 이후 집계된 그룹을 필터링합니다. WHERE와의 차이가 중요합니다.
+
+**WHERE vs HAVING**
+| 항목 | WHERE | HAVING |
+|------|-------|--------|
+| 처리 대상 | 개별 행 | 그룹 |
+| 실행 순서 | GROUP BY 이전 | GROUP BY 이후 |
+| 집계 함수 | 사용 불가 (ORA-00934) | 사용 가능 |
+
+**성능 팁:** 집계 함수가 없는 조건은 WHERE에 작성하면 GROUP BY 처리 대상이 줄어 더 빠릅니다.`, code: `-- 직원 수가 5명 이상인 부서
+SELECT department_id,
+       COUNT(*) AS 직원수
+FROM   employees
+GROUP BY department_id
+HAVING COUNT(*) >= 5
+ORDER BY COUNT(*) DESC;
+
+-- WHERE + HAVING 조합
+-- WHERE: 그룹화 전 행 필터 / HAVING: 그룹화 후 그룹 필터
+SELECT department_id,
+       ROUND(AVG(salary), 2) AS 평균급여
+FROM   employees
+WHERE  job_id != 'SA_REP'          -- 먼저 행 필터
+GROUP BY department_id
+HAVING AVG(salary) > 7000          -- 집계 후 그룹 필터
+ORDER BY AVG(salary) DESC;
+
+-- 오류 예시: WHERE에 집계 함수 사용 불가
+-- SELECT department_id FROM employees
+-- WHERE COUNT(*) > 5              -- ORA-00934 오류!
+-- GROUP BY department_id;` },
+
+  { title: '4. ROLLUP · CUBE · GROUPING SETS', content: `Oracle 전용 확장 GROUP BY로 소계와 합계를 자동 생성합니다. MySQL에는 제한적인 동등 기능만 있습니다.
+
+**ROLLUP(col1, col2)**
+- (col1, col2) 상세 + col1 소계 + 전체 합계 (n+1개 집계)
+- 계층적 구조에 적합
+
+**CUBE(col1, col2)**
+- 모든 가능한 조합 (col1,col2), (col1), (col2), () 집계
+- 교차 분석(Cross-tab)에 적합
+
+**GROUPING SETS((a,b),(a),())**
+- 필요한 집계 조합만 명시적으로 지정
+
+**GROUPING(col) 함수**
+- 소계/총계 행: 1 반환
+- 일반 행: 0 반환 (소계 NULL과 실제 NULL 구분용)`, code: `-- ROLLUP: 부서별 소계 + 전체 합계
+SELECT CASE WHEN GROUPING(department_id)=1
+            THEN '전체합계'
+            ELSE NVL(TO_CHAR(department_id),'미배정')
+       END AS 부서,
+       SUM(salary) AS 급여합계
+FROM   employees
+GROUP BY ROLLUP(department_id);
+
+-- ROLLUP: 부서·직무별 상세 + 부서 소계 + 전체 합계
+SELECT department_id,
+       job_id,
+       SUM(salary) AS 급여합계
+FROM   employees
+GROUP BY ROLLUP(department_id, job_id)
+ORDER BY department_id, job_id;
+
+-- GROUPING SETS: 원하는 집계만 선택
+SELECT department_id,
+       job_id,
+       SUM(salary) AS 급여합계
+FROM   employees
+GROUP BY GROUPING SETS((department_id, job_id), (department_id), ());` },
+
+  { title: '5. LISTAGG와 종합 정리', content: `LISTAGG는 그룹 내 값을 지정 구분자로 연결하는 Oracle 전용 집계 함수입니다. MySQL의 GROUP_CONCAT()에 해당합니다.
+
+**LISTAGG 구문**
+\`\`\`sql
+LISTAGG(column, delimiter) WITHIN GROUP (ORDER BY col)
+\`\`\`
+
+**Oracle 19c 추가 옵션**
+- ON OVERFLOW TRUNCATE: 4000자 초과 시 잘라냄
+- ON OVERFLOW ERROR: 초과 시 오류 (기본값)
+
+**그룹 함수 중첩**
+Oracle에서 그룹 함수를 한 단계 중첩할 수 있습니다:
+- AVG(SUM(salary)): 부서별 급여 합계의 평균
+
+**전체 흐름 요약**
+\`\`\`
+FROM → WHERE(행 필터) → GROUP BY(그룹화)
+→ HAVING(그룹 필터) → SELECT → ORDER BY
+\`\`\``, code: `-- LISTAGG: 부서별 직원 이름 목록
+SELECT department_id,
+       LISTAGG(last_name, ', ')
+         WITHIN GROUP (ORDER BY last_name) AS 직원목록
+FROM   employees
+WHERE  department_id IN (50, 60, 90)
+GROUP BY department_id;
+
+-- LISTAGG ON OVERFLOW TRUNCATE (Oracle 19c)
+SELECT department_id,
+       LISTAGG(last_name, ', ' ON OVERFLOW TRUNCATE '...')
+         WITHIN GROUP (ORDER BY last_name) AS 직원목록
+FROM   employees
+GROUP BY department_id;
+
+-- 그룹 함수 중첩: 부서별 급여합계의 최댓값
+SELECT MAX(SUM(salary)) AS 최대급여합계
+FROM   employees
+GROUP BY department_id;
+
+-- 종합: 평균 급여보다 높은 부서 + 직원 목록
+SELECT department_id,
+       ROUND(AVG(salary), 0)                                    AS 평균급여,
+       LISTAGG(last_name, ', ') WITHIN GROUP (ORDER BY salary DESC) AS 직원목록
+FROM   employees
+GROUP BY department_id
+HAVING AVG(salary) > (SELECT AVG(salary) FROM employees)
+ORDER BY AVG(salary) DESC;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
   ch03: CH03_SECTIONS,
+  ch04: CH04_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
