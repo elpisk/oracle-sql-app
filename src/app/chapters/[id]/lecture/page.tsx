@@ -4366,6 +4366,253 @@ FROM   sales_source_data;
 - ETL 스테이징 → 팩트 테이블 로드` },
 ]
 
+const CH19_SECTIONS = [
+  { title: '1. 서브쿼리를 이용한 데이터 조작 개요', content: `DML(INSERT, UPDATE, DELETE) 문에서 서브쿼리를 활용하면 다른 테이블의 데이터를 기반으로 데이터를 삽입·갱신·삭제할 수 있습니다.
+
+**서브쿼리 DML 유형**
+| DML 유형 | 서브쿼리 위치 | 용도 |
+|----------|--------------|------|
+| INSERT INTO (subquery) | INTO 절 | 인라인 뷰에 행 삽입 |
+| INSERT INTO ... SELECT | SELECT 절 | 다른 테이블에서 대량 복사 |
+| UPDATE ... SET (subquery) | SET 절 | 다른 테이블 기반 갱신 |
+| DELETE WHERE (subquery) | WHERE 절 | 다른 테이블 기반 삭제 |
+| WITH CHECK OPTION | INTO 절 서브쿼리 | 조건 위반 DML 차단 |
+
+**핵심 개념**
+- **상관 서브쿼리(Correlated Subquery)**: 외부 쿼리의 현재 행을 참조하는 서브쿼리
+- **스칼라 서브쿼리(Scalar Subquery)**: 1행 1열을 반환하는 서브쿼리
+- **인라인 뷰(Inline View)**: FROM 절이나 INTO 절에 위치하는 서브쿼리
+
+\`\`\`sql
+-- 기본 패턴 비교
+-- 1. 인라인 뷰에 삽입
+INSERT INTO (SELECT col1, col2 FROM t WHERE cond) VALUES (v1, v2);
+
+-- 2. 서브쿼리 결과 전체 삽입
+INSERT INTO target_t SELECT col1, col2 FROM source_t WHERE cond;
+
+-- 3. 상관 서브쿼리 기반 갱신
+UPDATE t1 SET col = (SELECT val FROM t2 WHERE t2.id = t1.id);
+
+-- 4. 상관 서브쿼리 기반 삭제
+DELETE FROM t1 WHERE EXISTS (SELECT NULL FROM t2 WHERE t2.id = t1.id);
+\`\`\`` },
+
+  { title: '2. INSERT INTO (서브쿼리) — 인라인 뷰에 삽입', content: `FROM 절 서브쿼리(인라인 뷰)를 INSERT 대상으로 사용하여 기반 테이블에 데이터를 삽입합니다.
+
+**구문**
+\`\`\`sql
+INSERT INTO (
+    SELECT col1, col2, col3
+    FROM   base_table
+    WHERE  condition
+)
+VALUES (value1, value2, value3);
+\`\`\`
+
+**실전 예제**
+\`\`\`sql
+-- 유럽 지역 locations에 새 행 삽입
+INSERT INTO (
+    SELECT location_id, city, country_id
+    FROM   locations
+    JOIN   countries  USING (country_id)
+    JOIN   regions    USING (region_id)
+    WHERE  region_name = 'Europe'
+)
+VALUES (3300, 'Cardiff', 'UK');
+\`\`\`
+
+**INSERT INTO ... SELECT (다중 행 삽입)**
+\`\`\`sql
+-- 부서 80번 직원을 sales_employees 테이블로 복사
+INSERT INTO sales_employees (employee_id, last_name, salary, department_id)
+SELECT employee_id, last_name, salary, department_id
+FROM   employees
+WHERE  department_id = 80;
+
+-- CTAS: 구조 + 데이터 한 번에 복사
+CREATE TABLE emp_backup AS
+SELECT * FROM employees;
+\`\`\`
+
+**주의 사항**
+- 서브쿼리는 **key-preserved table** 이어야 삽입 가능
+- GROUP BY를 포함한 집계 서브쿼리는 삽입 불가 (ORA-01732)
+- INSERT INTO ... SELECT는 VALUES 절 없이 사용
+- 복사 시 PK, FK 등 제약 조건은 복사되지 않음` },
+
+  { title: '3. WITH CHECK OPTION — 데이터 변경 통제', content: `인라인 뷰 서브쿼리에 WITH CHECK OPTION을 추가하면 서브쿼리의 WHERE 조건을 위반하는 INSERT/UPDATE를 차단합니다.
+
+**구문**
+\`\`\`sql
+INSERT INTO (
+    SELECT col1, col2, col3
+    FROM   base_table
+    WHERE  condition
+    WITH CHECK OPTION
+)
+VALUES (value1, value2, value3);
+\`\`\`
+
+**동작 원리**
+\`\`\`sql
+-- 성공 케이스: 조건 만족
+INSERT INTO (
+    SELECT location_id, city, country_id
+    FROM   locations
+    WHERE  country_id = 'UK'
+    WITH CHECK OPTION
+)
+VALUES (3300, 'Cardiff', 'UK');   -- country_id='UK' 조건 만족 → 성공
+
+-- 실패 케이스: ORA-01402 오류
+INSERT INTO (
+    SELECT location_id, city, country_id
+    FROM   locations
+    WHERE  country_id = 'UK'
+    WITH CHECK OPTION
+)
+VALUES (9999, 'New York', 'US');   -- 'US' ≠ 'UK' → ORA-01402 오류
+\`\`\`
+
+**UPDATE에서도 WITH CHECK OPTION 사용**
+\`\`\`sql
+UPDATE (
+    SELECT location_id, city, country_id
+    FROM   locations
+    WHERE  country_id = 'UK'
+    WITH CHECK OPTION
+)
+SET city = 'Birmingham'
+WHERE location_id = 2400;
+-- city 변경은 허용 (country_id='UK' 조건 유지)
+\`\`\`
+
+**WITH CHECK OPTION vs. 없음**
+| | WITH CHECK OPTION | 없음 |
+|--|---|---|
+| 조건 만족 데이터 | 삽입 가능 | 삽입 가능 |
+| 조건 위반 데이터 | ORA-01402 오류 | 삽입 가능 |
+| 용도 | 데이터 무결성 보장 | 단순 필터링 |` },
+
+  { title: '4. 상관 서브쿼리를 이용한 UPDATE', content: `외부 쿼리의 현재 행을 서브쿼리에서 참조하여 다른 테이블의 값으로 행을 갱신합니다.
+
+**구문**
+\`\`\`sql
+UPDATE outer_table alias
+SET    col = (
+    SELECT value
+    FROM   other_table
+    WHERE  other_table.col = alias.col   -- 외부 별칭 참조
+);
+\`\`\`
+
+**실전 예제**
+\`\`\`sql
+-- 직원의 department_name을 departments 테이블에서 채움
+UPDATE empl6 e
+SET    department_name = (
+    SELECT department_name
+    FROM   departments d
+    WHERE  d.department_id = e.department_id
+);
+
+-- 각 직원 급여를 부서 평균의 110%로 갱신
+UPDATE employees e
+SET    salary = (
+    SELECT AVG(salary) * 1.1
+    FROM   employees
+    WHERE  department_id = e.department_id
+);
+\`\`\`
+
+**실행 원리**
+1. 외부 테이블에서 행 하나를 가져옴
+2. 그 행의 값으로 서브쿼리를 실행
+3. 결과(1행 1열)로 해당 열을 갱신
+4. 모든 행에 대해 반복
+
+**주의 사항**
+\`\`\`sql
+-- 서브쿼리 0건 반환 → NULL 갱신
+UPDATE employees e
+SET    mgr_salary = (
+    SELECT salary FROM employees WHERE employee_id = e.manager_id
+);
+-- manager_id가 NULL인 직원은 mgr_salary = NULL
+
+-- 서브쿼리 2행 이상 반환 → ORA-01427 오류
+-- WITH 절로 성능 개선
+WITH dept_stats AS (
+    SELECT department_id, AVG(salary) avg_sal
+    FROM   employees GROUP BY department_id
+)
+UPDATE employees e
+SET    salary = (SELECT avg_sal FROM dept_stats WHERE department_id = e.department_id);
+\`\`\`` },
+
+  { title: '5. 상관 서브쿼리를 이용한 DELETE와 트랜잭션 제어', content: `다른 테이블의 데이터 존재 여부나 값을 기반으로 행을 선택적으로 삭제합니다.
+
+**EXISTS를 이용한 상관 DELETE**
+\`\`\`sql
+-- employee_history에 이력이 있는 직원 삭제
+DELETE FROM empl6 e
+WHERE EXISTS (
+    SELECT NULL
+    FROM   employee_history eh
+    WHERE  eh.employee_id = e.employee_id
+);
+
+-- 직원이 없는 부서 삭제
+DELETE FROM departments d
+WHERE NOT EXISTS (
+    SELECT NULL FROM employees WHERE department_id = d.department_id
+);
+\`\`\`
+
+**= vs EXISTS — NULL 처리 차이**
+\`\`\`sql
+-- 위험: = 연산자 (서브쿼리가 2건 이상이면 ORA-01427)
+DELETE FROM empl6 e
+WHERE employee_id = (SELECT employee_id FROM employee_history WHERE employee_id = e.employee_id);
+
+-- 안전: EXISTS (복수 행 반환 OK, NULL 안전)
+DELETE FROM empl6 e
+WHERE EXISTS (SELECT NULL FROM employee_history WHERE employee_id = e.employee_id);
+
+-- NOT IN의 NULL 함정 (manager_id에 NULL 포함 시 0건 삭제)
+DELETE FROM employees WHERE employee_id NOT IN (SELECT manager_id FROM employees);
+-- → NOT EXISTS로 대체 권장
+\`\`\`
+
+**트랜잭션 제어 (TCL)**
+\`\`\`sql
+-- SAVEPOINT로 중간 복구 지점 설정
+SAVEPOINT before_delete;
+
+DELETE FROM employees e
+WHERE EXISTS (SELECT NULL FROM job_history WHERE employee_id = e.employee_id AND end_date < SYSDATE - 365);
+
+-- 결과 확인 후 결정
+SELECT COUNT(*) FROM employees;  -- 미커밋 상태에서 확인 가능
+
+-- 되돌리기
+ROLLBACK TO before_delete;
+
+-- 또는 확정
+COMMIT;
+\`\`\`
+
+**FK 제약 주의**
+\`\`\`sql
+-- ORA-02292: child record found (자식 레코드 있는 부모 삭제 불가)
+DELETE FROM departments d
+WHERE EXISTS (SELECT NULL FROM employees WHERE department_id = d.department_id);
+-- employees.department_id → departments.department_id FK로 인해 오류 발생
+\`\`\`` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -4385,6 +4632,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch16: CH16_SECTIONS,
   ch17: CH17_SECTIONS,
   ch18: CH18_SECTIONS,
+  ch19: CH19_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
