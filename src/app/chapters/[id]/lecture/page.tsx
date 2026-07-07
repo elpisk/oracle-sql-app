@@ -4801,6 +4801,188 @@ FROM DUAL;
 \`\`\`` },
 ]
 
+const CH21_SECTIONS = [
+  { title: '1. INTERVAL 데이터 타입 개요', content: `INTERVAL 타입은 두 날짜/시간 값 사이의 **기간(간격)**을 저장합니다. 특정 시점이 아닌 기간의 길이를 나타냅니다.
+
+**INTERVAL 2종**
+| 타입 | 저장 필드 | 용도 |
+|------|-----------|------|
+| \`INTERVAL YEAR TO MONTH\` | YEAR, MONTH | 연·월 단위 기간 |
+| \`INTERVAL DAY TO SECOND\` | DAY, HOUR, MINUTE, SECOND | 일·시·분·초 단위 기간 |
+
+**DATE, TIMESTAMP와의 차이**
+\`\`\`
+DATE/TIMESTAMP : 특정 시점  (예: 2024-01-15 10:30:00)
+INTERVAL       : 기간의 길이 (예: 2년 6개월, 100일 10시간)
+\`\`\`
+
+**INTERVAL 산술 연산 지원 범위**
+\`\`\`sql
+DATE + INTERVAL  → DATE       (지원)
+DATE - INTERVAL  → DATE       (지원)
+INTERVAL + INTERVAL → INTERVAL (동일 타입만, 지원)
+INTERVAL × NUMBER  → 지원     (예: INTERVAL '1' DAY * 5)
+INTERVAL YEAR TO MONTH + INTERVAL DAY TO SECOND → 불가 (다른 타입)
+\`\`\`
+
+**INTERVAL 변환 함수 요약**
+| 함수 | 용도 |
+|------|------|
+| \`TO_YMINTERVAL('Y-M')\` | 문자열 → INTERVAL YEAR TO MONTH |
+| \`TO_DSINTERVAL('D HH:MI:SS')\` | 문자열 → INTERVAL DAY TO SECOND |
+| \`NUMTOYMINTERVAL(n, '단위')\` | 숫자 → INTERVAL YEAR TO MONTH |
+| \`NUMTODSINTERVAL(n, '단위')\` | 숫자 → INTERVAL DAY TO SECOND |` },
+
+  { title: '2. INTERVAL YEAR TO MONTH', content: `연·월 단위의 기간을 저장합니다. 보증 기간, 계약 기간, 재직 기간 등에 활용합니다.
+
+**구문과 정밀도**
+\`\`\`sql
+INTERVAL YEAR[(year_precision)] TO MONTH
+-- year_precision: YEAR 필드의 최대 자릿수 (기본값 2, 최대 99년)
+-- YEAR(3)이면 최대 999년까지 저장 가능
+\`\`\`
+
+**리터럴 삽입 방법 3가지**
+\`\`\`sql
+CREATE TABLE warranty (
+    prod_id       NUMBER,
+    warranty_time INTERVAL YEAR(3) TO MONTH
+);
+
+-- 1. INTERVAL 키워드
+INSERT INTO warranty VALUES (1, INTERVAL '8' MONTH);
+INSERT INTO warranty VALUES (2, INTERVAL '200' YEAR(3));
+
+-- 2. 문자열 리터럴 'YEAR-MONTH'
+INSERT INTO warranty VALUES (3, '200-11');  -- 200년 11개월
+
+-- 3. TO_YMINTERVAL 함수
+INSERT INTO warranty VALUES (4, TO_YMINTERVAL('1-6'));  -- 1년 6개월
+\`\`\`
+
+**출력 형식: +YEAR-MONTH**
+\`\`\`
++00-08  = 8개월
++01-06  = 1년 6개월
++200-00 = 200년
++200-11 = 200년 11개월
+\`\`\`
+
+**NUMTOYMINTERVAL — 숫자를 INTERVAL로**
+\`\`\`sql
+SELECT NUMTOYMINTERVAL(18, 'MONTH')  FROM DUAL;  -- +01-06 (1년 6개월)
+SELECT NUMTOYMINTERVAL(30, 'MONTH')  FROM DUAL;  -- +02-06 (2년 6개월)
+SELECT NUMTOYMINTERVAL(2.5, 'YEAR')  FROM DUAL;  -- +02-06
+\`\`\`
+
+**EXTRACT로 필드 추출**
+\`\`\`sql
+SELECT EXTRACT(YEAR  FROM INTERVAL '2-11' YEAR TO MONTH)  FROM DUAL;  -- 2
+SELECT EXTRACT(MONTH FROM INTERVAL '2-11' YEAR TO MONTH)  FROM DUAL;  -- 11
+\`\`\`` },
+
+  { title: '3. INTERVAL DAY TO SECOND', content: `일·시·분·초 단위의 기간을 저장합니다. 응답 시간, 배달 시간, 실험 기간 등에 활용합니다.
+
+**구문과 정밀도**
+\`\`\`sql
+INTERVAL DAY[(day_precision)] TO SECOND[(fractional_seconds)]
+-- day_precision: DAY 필드 최대 자릿수 (기본값 2, 최대 99일)
+-- fractional_seconds: SECOND 소수점 자릿수 (기본값 6, 범위 0~9)
+\`\`\`
+
+**리터럴 삽입 방법**
+\`\`\`sql
+CREATE TABLE lab (
+    exp_id    NUMBER,
+    test_time INTERVAL DAY(2) TO SECOND
+);
+
+-- 1. 문자열 리터럴 'DD HH:MI:SS'
+INSERT INTO lab VALUES (1, '90 00:00:00');           -- 90일
+
+-- 2. INTERVAL 키워드
+INSERT INTO lab VALUES (2, INTERVAL '6 03:30:16' DAY TO SECOND);  -- 6일 3시간 30분 16초
+
+-- 3. TO_DSINTERVAL 함수
+INSERT INTO lab VALUES (3, TO_DSINTERVAL('14 12:30:00'));  -- 14일 12시간 30분
+
+-- 4. NUMTODSINTERVAL 함수
+INSERT INTO lab VALUES (4, NUMTODSINTERVAL(2.5, 'DAY'));   -- 2일 12시간
+\`\`\`
+
+**출력 형식: +DD HH:MM:SS.ffffff**
+\`\`\`
++90 00:00:00.000000  = 90일
++06 03:30:16.000000  = 6일 3시간 30분 16초
++02 12:00:00.000000  = 2일 12시간 (2.5일)
+\`\`\`
+
+**NUMTODSINTERVAL — 숫자를 INTERVAL로**
+\`\`\`sql
+SELECT NUMTODSINTERVAL(36,  'HOUR')    FROM DUAL;  -- +01 12:00:00 (36시간)
+SELECT NUMTODSINTERVAL(90,  'MINUTE')  FROM DUAL;  -- +00 01:30:00 (90분)
+SELECT NUMTODSINTERVAL(1.5, 'DAY')    FROM DUAL;  -- +01 12:00:00 (1.5일)
+\`\`\`` },
+
+  { title: '4. INTERVAL 산술 연산과 실전 활용', content: `INTERVAL을 날짜 연산과 비즈니스 로직에 활용하는 방법입니다.
+
+**DATE ± INTERVAL 연산**
+\`\`\`sql
+-- hire_date + 1년 2개월
+SELECT hire_date + TO_YMINTERVAL('01-02') AS result
+FROM   employees WHERE employee_id = 100;
+-- hire_date: 2005-01-01 → 2006-03-01
+
+-- 100일 10시간 후
+SELECT hire_date + TO_DSINTERVAL('100 10:00:00')
+FROM   employees WHERE employee_id = 100;
+
+-- 음수 INTERVAL (과거 날짜)
+SELECT SYSDATE - INTERVAL '6' MONTH   AS six_months_ago,
+       SYSDATE - TO_YMINTERVAL('1-0') AS one_year_ago
+FROM   DUAL;
+\`\`\`
+
+**INTERVAL 간 덧셈/뺄셈 (동일 타입만)**
+\`\`\`sql
+SELECT INTERVAL '2' YEAR + INTERVAL '6' MONTH   FROM DUAL;  -- +02-06
+SELECT INTERVAL '10' HOUR + INTERVAL '90' MINUTE FROM DUAL; -- +00 11:30:00
+\`\`\`
+
+**TO_YMINTERVAL vs TO_DSINTERVAL — 윤년 차이**
+\`\`\`sql
+-- 2024년(윤년 366일) 기준
+SELECT DATE '2024-01-01' + TO_YMINTERVAL('01-00')         AS yr_method,  -- 2025-01-01
+       DATE '2024-01-01' + TO_DSINTERVAL('365 00:00:00')   AS day_method  -- 2024-12-31
+FROM DUAL;
+-- 달력 기준 1년 후 ≠ 365일 후 (윤년에서 차이 발생)
+\`\`\`
+
+**실전 활용 패턴**
+\`\`\`sql
+-- 1. 보증 만료일 계산
+SELECT release_date + warranty_time AS expiry FROM products;
+
+-- 2. 재직 기간을 INTERVAL로
+SELECT NUMTOYMINTERVAL(
+           TRUNC(MONTHS_BETWEEN(SYSDATE, hire_date)), 'MONTH'
+       ) AS tenure
+FROM   employees;
+
+-- 3. SLA 초과 티켓 조회
+SELECT ticket_id FROM tickets
+WHERE  status = 'OPEN'
+AND    created_at + NUMTODSINTERVAL(4, 'HOUR') < CURRENT_TIMESTAMP;
+
+-- 4. CASE로 조건부 INTERVAL
+SELECT hire_date + CASE
+    WHEN salary > 10000 THEN TO_YMINTERVAL('0-3')
+    ELSE                     TO_YMINTERVAL('0-6')
+END AS review_date
+FROM employees;
+\`\`\`` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -4822,6 +5004,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch18: CH18_SECTIONS,
   ch19: CH19_SECTIONS,
   ch20: CH20_SECTIONS,
+  ch21: CH21_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
