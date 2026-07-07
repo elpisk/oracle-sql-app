@@ -5,6 +5,7 @@ import { ArrowLeft, ChevronDown, ChevronUp, Code2, EyeOff } from 'lucide-react'
 import { getChapter } from '@/data/chapters'
 import { getPractice } from '@/data/practice'
 import { updatePracticeCompleted, getProgress } from '@/lib/store'
+import { track } from '@/lib/tracker_new'
 
 export default function PracticePage() {
   const { id } = useParams<{ id: string }>()
@@ -38,6 +39,9 @@ export default function PracticePage() {
     setChecked(prev => {
       const s = new Set(prev); s.has(idx) ? s.delete(idx) : s.add(idx)
       updatePracticeCompleted(ch.id, s.size)
+      if (s.size === problems.length) {
+        track({ type: 'practice', chapterId: ch.id, completed: s.size, practiceTotal: problems.length })
+      }
       return s
     })
   }

@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, XCircle } from 'lucide-react'
 import { getChapter } from '@/data/chapters'
 import { getQuiz } from '@/data/quiz'
 import { saveQuizAttempt } from '@/lib/store'
+import { track } from '@/lib/tracker_new'
 import Badge from '@/components/Badge'
 import type { QuizQuestion, QuizAttempt } from '@/lib/types'
 
@@ -60,6 +61,7 @@ export default function QuizPage() {
         completedAt: new Date().toISOString(),
       }
       saveQuizAttempt(attempt)
+      track({ type: 'quiz', chapterId: id, score: correctCount, total })
       router.push(`/chapters/${id}/quiz/result?score=${correctCount}&total=${total}`)
     } else {
       const next = current + 1

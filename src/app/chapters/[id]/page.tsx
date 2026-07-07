@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { ArrowLeft, BookOpen, PenSquare, Code2, ChevronRight, Clock, CheckCircle2 } from 'lucide-react'
 import { getChapter } from '@/data/chapters'
 import { getProgress, getBestScore, markLectureComplete } from '@/lib/store'
+import { track } from '@/lib/tracker_new'
 import { useEffect, useState } from 'react'
 
 export default function ChapterDetail() {
@@ -23,6 +24,7 @@ export default function ChapterDetail() {
   const handleLectureStart = () => {
     markLectureComplete(id)
     setProg(getProgress(id))
+    track({ type: 'lecture', chapterId: id })
     router.push(`/chapters/${id}/lecture`)
   }
 
