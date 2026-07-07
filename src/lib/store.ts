@@ -75,13 +75,17 @@ export const saveQuizAttempt = (attempt: QuizAttempt): void => {
 export const getInquiries = (): Inquiry[] =>
   get<Inquiry[]>(KEYS.inquiries) ?? []
 
-export const saveInquiry = (inquiry: Omit<Inquiry, 'id' | 'createdAt' | 'status'>): void => {
+export const saveInquiry = (inquiry: Omit<Inquiry, 'id' | 'createdAt' | 'status' | 'authorName' | 'authorEmail' | 'authorCohort'>): void => {
+  const profile = getProfile()
   const all = getInquiries()
   all.unshift({
     ...inquiry,
     id: crypto.randomUUID(),
     status: 'pending',
     createdAt: new Date().toISOString(),
+    authorName:   profile?.name,
+    authorEmail:  profile?.email,
+    authorCohort: profile?.cohort,
   })
   set(KEYS.inquiries, all)
 }

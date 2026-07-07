@@ -62,4 +62,7 @@ export interface Inquiry {
   status: 'pending' | 'answered'
   answer?: string
   createdAt: string
+  authorName?: string
+  authorEmail?: string
+  authorCohort?: string
 }

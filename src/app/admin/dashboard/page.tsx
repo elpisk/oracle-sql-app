@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import {
   BarChart2, MessageSquare, BookOpen, Settings,
   LogOut, CheckCircle2, Clock, Eye, EyeOff,
-  ChevronDown, Send, Trash2, ToggleLeft, ToggleRight,
+  ChevronDown, Send, Trash2, ToggleLeft, ToggleRight, User,
 } from 'lucide-react'
 import {
   getAdminAuth, setAdminAuth,
@@ -269,6 +269,22 @@ export default function AdminDashboard() {
                         </button>
                       </div>
                     </div>
+
+                    {/* 작성자 정보 */}
+                    {(inq.authorName || inq.authorEmail) && (
+                      <div className="flex items-center gap-2 bg-apple-gray-bg rounded-apple px-3 py-2">
+                        <User size={13} className="text-apple-secondary flex-shrink-0" />
+                        <span className="text-[13px] font-semibold text-apple-text">{inq.authorName ?? '—'}</span>
+                        {inq.authorEmail && (
+                          <span className="text-[12px] text-apple-secondary">{inq.authorEmail}</span>
+                        )}
+                        {inq.authorCohort && (
+                          <span className="text-[11px] font-semibold text-apple-blue bg-blue-50 px-2 py-0.5 rounded-full ml-auto">
+                            {inq.authorCohort}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* 문의 내용 */}
                     <p className="text-[14px] text-apple-text leading-relaxed bg-apple-gray-bg rounded-apple px-4 py-3">
