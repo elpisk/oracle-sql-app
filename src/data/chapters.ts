@@ -32,7 +32,7 @@ export const CHAPTERS: Chapter[] = [
 export const getChapter = (id: string) => CHAPTERS.find(c => c.id === id)
 
 /** 실제 강의·퀴즈·실습 콘텐츠가 준비된 챕터 목록 */
-export const CONTENT_READY = ['ch01', 'ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch07', 'ch08', 'ch09', 'ch10', 'ch11', 'ch12', 'ch13', 'ch22', 'ch23', 'ch24']
+export const CONTENT_READY = ['ch01', 'ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch07', 'ch08', 'ch09', 'ch10', 'ch11', 'ch12', 'ch13', 'ch14', 'ch22', 'ch23', 'ch24']
 
 export const GROUPS = {
   basic:    { label: 'SQL 기초',   color: '#0071E3' },

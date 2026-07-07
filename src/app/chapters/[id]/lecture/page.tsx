@@ -3254,6 +3254,202 @@ WHERE  department_id IS NOT NULL
 GROUP BY department_id;` },
 ]
 
+const CH14_SECTIONS = [
+  { title: '1. PIVOT 개요와 기본 구문', content: `PIVOT은 행 데이터를 열로 변환하여 크로스탭(교차표) 형식으로 출력하는 연산자입니다. Oracle 11g부터 지원됩니다.
+
+**PIVOT 기본 구문**
+\`\`\`sql
+SELECT *
+FROM (서브쿼리 또는 테이블)
+PIVOT (
+    집계함수(집계열) [AS 별칭]
+    FOR 피벗열
+    IN (값1 [AS 별칭1], 값2 [AS 별칭2], ...)
+);
+\`\`\`
+
+**세 가지 필수 구성 요소**
+| 구성 | 설명 |
+|------|------|
+| 집계함수 | COUNT, SUM, AVG, MAX, MIN |
+| FOR 절 | 어떤 열의 값을 새 열로 변환할지 지정 |
+| IN 절 | 새 열이 될 값 목록 (리터럴만 가능) |
+
+**서브쿼리가 필요한 이유**
+원본 테이블을 직접 PIVOT하면 집계열/피벗열 외의 모든 열이 자동으로 GROUP BY 기준이 됩니다. 서브쿼리로 필요한 열만 선택하면 원하는 형태의 피벗이 가능합니다.`, code: `-- 기본 PIVOT 예시
+SELECT *
+FROM (
+    SELECT department_id, job_id   -- 필요한 열만 선택
+    FROM   employees
+    WHERE  department_id IS NOT NULL
+)
+PIVOT (
+    COUNT(*) FOR job_id IN (
+        'SA_REP'   AS 영업직,
+        'IT_PROG'  AS IT직,
+        'ST_CLERK' AS 물류직
+    )
+)
+ORDER BY department_id;
+
+-- IN 절에 없는 값은 자동 제외
+-- 해당 교차점에 데이터 없으면 NULL 반환
+-- CASE WHEN 동등 표현:
+SELECT department_id,
+       COUNT(CASE WHEN job_id='SA_REP'   THEN 1 END) AS 영업직,
+       COUNT(CASE WHEN job_id='IT_PROG'  THEN 1 END) AS IT직,
+       COUNT(CASE WHEN job_id='ST_CLERK' THEN 1 END) AS 물류직
+FROM   employees WHERE department_id IS NOT NULL
+GROUP BY department_id;` },
+
+  { title: '2. PIVOT 응용', content: `여러 집계 함수 사용, NULL 처리, ORDER BY/WHERE 적용 방법을 알아봅니다.
+
+**여러 집계 함수 사용**
+\`\`\`sql
+PIVOT (COUNT(*) AS CNT, AVG(salary) AS AVG_SAL
+       FOR job_id IN ('SA_REP' AS S, 'IT_PROG' AS I))
+\`\`\`
+→ 열 이름: **IN별칭_집계별칭** (예: S_CNT, S_AVG_SAL, I_CNT, I_AVG_SAL)
+
+**NULL 처리**
+PIVOT에서 데이터가 없는 교차점은 NULL을 반환합니다. NVL 또는 COALESCE로 0 등으로 변환합니다.
+\`\`\`sql
+SELECT NVL(영업직, 0) AS 영업직, ...
+FROM (... PIVOT (...))
+\`\`\`
+
+**제약사항**
+- IN 절: 리터럴 값만 가능 (서브쿼리 불가)
+- 동적 열(런타임 결정): PL/SQL 동적 SQL 필요
+- ROLLUP/CUBE와 직접 결합 불가`, code: `-- 여러 집계 함수 PIVOT
+SELECT *
+FROM (SELECT department_id, job_id, salary FROM employees)
+PIVOT (
+    COUNT(*)             AS 인원수,
+    ROUND(AVG(salary),0) AS 평균급여
+    FOR job_id IN (
+        'SA_REP'   AS 영업,
+        'ST_CLERK' AS 물류
+    )
+);
+-- 결과 열: 영업_인원수, 영업_평균급여, 물류_인원수, 물류_평균급여
+
+-- NULL → 0 변환
+SELECT department_id,
+       NVL(영업직, 0) AS 영업직,
+       NVL(IT직, 0)   AS IT직
+FROM (
+    SELECT department_id, job_id FROM employees
+    WHERE  department_id IS NOT NULL
+)
+PIVOT (COUNT(*) FOR job_id IN ('SA_REP' AS 영업직, 'IT_PROG' AS IT직));
+
+-- WHERE, ORDER BY 적용
+SELECT * FROM ( ... PIVOT ... )
+WHERE NVL(영업직, 0) > 0
+ORDER BY 영업직 DESC;` },
+
+  { title: '3. UNPIVOT 기본', content: `UNPIVOT은 PIVOT의 반대 연산으로, 여러 열의 값을 행으로 변환합니다.
+
+**UNPIVOT 기본 구문**
+\`\`\`sql
+SELECT 열들
+FROM 테이블
+UNPIVOT [INCLUDE NULLS | EXCLUDE NULLS] (
+    값열 FOR 레이블열 IN (
+        열1 [AS 별칭1], 열2 [AS 별칭2], ...
+    )
+);
+\`\`\`
+
+**결과 행 수**
+- 최대 = 원본 행 수 × UNPIVOT 대상 열 수
+- EXCLUDE NULLS(기본): 값이 NULL인 행 제외
+- INCLUDE NULLS: NULL도 포함
+
+**NULL 처리 옵션 비교**
+| 옵션 | 설명 |
+|------|------|
+| EXCLUDE NULLS (기본) | 변환 열 값이 NULL인 행 제외 |
+| INCLUDE NULLS | NULL 값도 행으로 포함 |
+
+**주의**: UNPIVOT 대상 열들은 동일한 데이터 타입이어야 합니다.`, code: `-- UNPIVOT 기본
+SELECT prod_id, quarter, sales
+FROM quarterly_sales
+UNPIVOT (
+    sales FOR quarter IN (
+        q1_sales AS 'Q1',
+        q2_sales AS 'Q2',
+        q3_sales AS 'Q3',
+        q4_sales AS 'Q4'
+    )
+);
+
+-- INCLUDE NULLS: NULL 행도 포함
+SELECT prod_id, quarter, sales
+FROM quarterly_sales
+UNPIVOT INCLUDE NULLS (
+    sales FOR quarter IN (q1 AS 'Q1', q2 AS 'Q2', q3 AS 'Q3')
+);
+
+-- 다중 열 쌍 UNPIVOT
+SELECT prod, quarter, qty, price
+FROM prod_quarterly
+UNPIVOT (
+    (qty, price) FOR quarter IN (
+        (q1_qty, q1_price) AS 'Q1',
+        (q2_qty, q2_price) AS 'Q2'
+    )
+);` },
+
+  { title: '4. PIVOT/UNPIVOT 종합 활용', content: `PIVOT과 UNPIVOT을 실무 시나리오에 활용하는 패턴을 알아봅니다.
+
+**주요 활용 패턴**
+
+1. **PIVOT + NVL**: NULL을 의미있는 값으로 변환
+2. **PIVOT + UNION ALL**: 합계 행 추가
+3. **PIVOT + 분석 함수**: 피벗 결과에 순위/누적 등 추가
+4. **UNPIVOT + WHERE**: 특정 속성만 필터링
+5. **PIVOT → UNPIVOT 왕복**: 데이터 형태 재구성
+
+**PIVOT vs CASE WHEN 선택 기준**
+| 상황 | 권장 방법 |
+|------|---------|
+| 열 목록 고정, 코드 간결성 | PIVOT |
+| 동적 열 생성 필요 | PL/SQL 동적 SQL |
+| Oracle 11g 미만 환경 | CASE WHEN + GROUP BY |
+| 복잡한 조건별 집계 | CASE WHEN |
+
+**데이터 타입 통일 (UNPIVOT용)**
+숫자, 날짜 등 다른 타입의 열을 UNPIVOT하려면 TO_CHAR로 문자열로 통일합니다.`, code: `-- PIVOT + 합계 행 (UNION ALL)
+SELECT department_id, NVL(영업직,0) AS 영업직, NVL(IT직,0) AS IT직
+FROM (SELECT department_id, job_id FROM employees WHERE department_id IS NOT NULL)
+PIVOT (COUNT(*) FOR job_id IN ('SA_REP' AS 영업직, 'IT_PROG' AS IT직))
+UNION ALL
+SELECT NULL,
+       COUNT(CASE WHEN job_id='SA_REP'  THEN 1 END),
+       COUNT(CASE WHEN job_id='IT_PROG' THEN 1 END)
+FROM   employees WHERE department_id IS NOT NULL
+ORDER BY department_id NULLS LAST;
+
+-- UNPIVOT + 타입 통일 (TO_CHAR)
+SELECT emp_id, attribute, value
+FROM (
+    SELECT employee_id AS emp_id,
+           TO_CHAR(salary)    AS salary_str,
+           TO_CHAR(hire_date,'YYYY-MM') AS hire_str
+    FROM   employees WHERE employee_id <= 105
+)
+UNPIVOT (value FOR attribute IN (
+    salary_str AS 'SALARY', hire_str AS 'HIRE_YM'));
+
+-- PIVOT 후 분석 함수 추가
+SELECT department_id, 영업직, 물류직,
+       RANK() OVER(ORDER BY NVL(영업직,0) DESC) AS 영업순위
+FROM (SELECT department_id, job_id FROM employees WHERE department_id IS NOT NULL)
+PIVOT (COUNT(*) FOR job_id IN ('SA_REP' AS 영업직, 'ST_CLERK' AS 물류직));` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -3268,6 +3464,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch11: CH11_SECTIONS,
   ch12: CH12_SECTIONS,
   ch13: CH13_SECTIONS,
+  ch14: CH14_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
