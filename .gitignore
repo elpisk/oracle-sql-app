@@ -1,6 +1,7 @@
 # Next.js
 .next/
 out/
+tsconfig.tsbuildinfo
 
 # Node
 node_modules/
