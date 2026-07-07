@@ -15,6 +15,7 @@ import { ch13Quiz } from './ch13'
 import { ch14Quiz } from './ch14'
 import { ch15Quiz } from './ch15'
 import { ch16Quiz } from './ch16'
+import { ch17Quiz } from './ch17'
 import { ch22Quiz } from './ch22'
 import { ch23Quiz } from './ch23'
 import { ch24Quiz } from './ch24'
@@ -36,6 +37,7 @@ const QUIZ_MAP: Record<string, QuizQuestion[]> = {
   ch14: ch14Quiz,
   ch15: ch15Quiz,
   ch16: ch16Quiz,
+  ch17: ch17Quiz,
   ch22: ch22Quiz,
   ch23: ch23Quiz,
   ch24: ch24Quiz,

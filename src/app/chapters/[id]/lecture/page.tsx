@@ -3994,6 +3994,202 @@ DROP된 테이블 복구         → FLASHBACK TABLE TO BEFORE DROP
 \`\`\`` },
 ]
 
+const CH17_SECTIONS = [
+  { title: '1. MERGE 개요와 기본 구문', content: `MERGE 문은 단일 DML로 조인 조건에 따라 행이 대상 테이블에 존재하면 UPDATE, 없으면 INSERT를 수행합니다. 데이터 웨어하우스 ETL, 증분 동기화에 최적화된 명령입니다.
+
+**기본 구문**
+\`\`\`sql
+MERGE INTO   대상_테이블 대상_별칭
+USING        {소스_테이블 | 뷰 | 서브쿼리} 소스_별칭
+ON           (조인_조건)
+WHEN MATCHED THEN
+    UPDATE SET 열1 = 값1, 열2 = 값2
+    [DELETE WHERE 조건]
+WHEN NOT MATCHED THEN
+    INSERT [(열_목록)]
+    VALUES (값_목록)
+    [WHERE 조건];
+\`\`\`
+
+**기본 예제 — copy_emp3를 employees로 동기화**
+\`\`\`sql
+MERGE INTO copy_emp3 c
+USING (SELECT * FROM employees) e
+ON    (c.employee_id = e.employee_id)
+WHEN MATCHED THEN
+    UPDATE SET
+        c.first_name    = e.first_name,
+        c.last_name     = e.last_name,
+        c.salary        = e.salary,
+        c.department_id = e.department_id
+    DELETE WHERE (e.commission_pct IS NOT NULL)
+WHEN NOT MATCHED THEN
+    INSERT VALUES (e.employee_id, e.first_name, e.last_name,
+                  e.email, e.phone_number, e.hire_date, e.job_id,
+                  e.salary, e.commission_pct, e.manager_id,
+                  e.department_id);
+\`\`\`
+
+**MERGE 특징**
+| 항목 | 내용 |
+|------|------|
+| 단일 패스 | 소스 데이터를 한 번만 읽어 UPDATE/INSERT 동시 처리 |
+| 성능 향상 | 개별 UPDATE+INSERT보다 효율적 |
+| DML | COMMIT/ROLLBACK 가능 |
+| USING 소스 | 테이블, 뷰, 서브쿼리 모두 가능 |
+| 절 선택 | WHEN MATCHED, WHEN NOT MATCHED 둘 다 선택적 |` },
+  { title: '2. WHEN MATCHED THEN UPDATE/DELETE', content: `WHEN MATCHED THEN은 ON 조건에 일치하는 행(대상에 이미 존재하는 행)에 적용됩니다. UPDATE, UPDATE+DELETE WHERE 조합을 사용할 수 있습니다.
+
+**UPDATE만 사용**
+\`\`\`sql
+MERGE INTO copy_emp c
+USING employees e ON (c.employee_id = e.employee_id)
+WHEN MATCHED THEN
+    UPDATE SET c.salary = e.salary,
+               c.job_id = e.job_id;
+\`\`\`
+
+**UPDATE WHERE (조건부 업데이트)**
+\`\`\`sql
+-- salary > 10000인 행만 업데이트
+MERGE INTO copy_emp c
+USING employees e ON (c.employee_id = e.employee_id)
+WHEN MATCHED THEN
+    UPDATE SET c.salary = e.salary
+    WHERE  e.salary > 10000;
+\`\`\`
+
+**UPDATE + DELETE WHERE**
+\`\`\`sql
+-- 업데이트 후 commission_pct가 있는 행 삭제
+MERGE INTO copy_emp3 c
+USING (SELECT * FROM employees) e
+ON    (c.employee_id = e.employee_id)
+WHEN MATCHED THEN
+    UPDATE SET c.salary = e.salary
+    DELETE WHERE e.commission_pct IS NOT NULL;
+\`\`\`
+
+**주의사항**
+\`\`\`sql
+-- ORA-38104: ON 절 컬럼 업데이트 불가
+MERGE INTO copy_emp c USING employees e
+ON (c.employee_id = e.employee_id)
+WHEN MATCHED THEN
+    UPDATE SET c.employee_id = e.employee_id + 1;  -- 오류!
+\`\`\`
+
+DELETE WHERE 실행 순서: ①ON 조건으로 MATCHED 행 찾기 ②UPDATE WHERE 필터링 ③UPDATE 실행 ④DELETE WHERE 평가 ⑤삭제.` },
+  { title: '3. WHEN NOT MATCHED THEN INSERT', content: `WHEN NOT MATCHED THEN은 ON 조건에 일치하는 대상 행이 없는 경우(소스에만 있는 행)에 INSERT를 수행합니다.
+
+**기본 INSERT**
+\`\`\`sql
+MERGE INTO copy_emp c
+USING employees e ON (c.employee_id = e.employee_id)
+WHEN NOT MATCHED THEN
+    INSERT (employee_id, last_name, salary)
+    VALUES (e.employee_id, e.last_name, e.salary);
+\`\`\`
+
+**INSERT WHERE (조건부 삽입)**
+\`\`\`sql
+-- department_id가 있는 행만 삽입
+MERGE INTO copy_emp c
+USING employees e ON (c.employee_id = e.employee_id)
+WHEN NOT MATCHED THEN
+    INSERT (employee_id, last_name, salary, department_id)
+    VALUES (e.employee_id, e.last_name, e.salary, e.department_id)
+    WHERE  e.department_id IS NOT NULL;
+\`\`\`
+
+**DELETE WHERE와 INSERT WHERE 조합**
+\`\`\`sql
+MERGE INTO target t
+USING source s ON (t.id = s.id)
+WHEN MATCHED THEN
+    UPDATE SET t.val = s.val, t.status = s.status
+    DELETE WHERE s.status = 'INACTIVE'
+WHEN NOT MATCHED THEN
+    INSERT (id, val, status)
+    VALUES (s.id, s.val, s.status)
+    WHERE  s.status = 'ACTIVE';  -- ACTIVE인 신규 행만 삽입
+\`\`\`
+
+**WHEN NOT MATCHED THEN만 사용 — "없으면 삽입"**
+\`\`\`sql
+-- 중복 방지 삽입 패턴
+MERGE INTO copy_emp c
+USING employees e ON (c.employee_id = e.employee_id)
+WHEN NOT MATCHED THEN
+    INSERT (employee_id, last_name, salary)
+    VALUES (e.employee_id, e.last_name, e.salary);
+\`\`\`` },
+  { title: '4. MERGE 고급 활용과 ETL 패턴', content: `MERGE는 데이터 웨어하우스 ETL, 집계 요약 테이블 갱신, 복수 소스 통합 등 다양한 고급 패턴에 활용됩니다.
+
+**서브쿼리 소스로 집계 결과 동기화**
+\`\`\`sql
+MERGE INTO dept_summary ds
+USING (
+  SELECT department_id,
+         COUNT(*)      AS headcount,
+         SUM(salary)   AS total_salary
+  FROM   employees
+  GROUP BY department_id
+) src
+ON    (ds.department_id = src.department_id)
+WHEN MATCHED THEN
+    UPDATE SET ds.headcount    = src.headcount,
+               ds.total_salary = src.total_salary
+WHEN NOT MATCHED THEN
+    INSERT (department_id, headcount, total_salary)
+    VALUES (src.department_id, src.headcount, src.total_salary);
+\`\`\`
+
+**복수 소스 통합 (UNION ALL)**
+\`\`\`sql
+MERGE INTO copy_emp c
+USING (
+  SELECT employee_id, last_name, salary FROM new_emp
+  UNION ALL
+  SELECT employee_id, last_name, salary FROM transfer_emp
+) src
+ON    (c.employee_id = src.employee_id)
+WHEN MATCHED THEN UPDATE SET c.salary = src.salary
+WHEN NOT MATCHED THEN INSERT (employee_id, last_name, salary)
+                      VALUES (src.employee_id, src.last_name, src.salary);
+\`\`\`
+
+**주요 오류와 대처**
+| 오류 | 원인 | 해결 |
+|------|------|------|
+| ORA-38104 | ON 절 컬럼을 UPDATE SET에서 수정 | ON 절 컬럼 제외 |
+| ORA-30926 | 소스에 ON 키 중복 → 대상 동일 행 반복 수정 | USING 소스에 DISTINCT/GROUP BY 추가 |
+
+**MERGE 전체 흐름**
+\`\`\`sql
+-- 배치 ETL 예시
+MERGE INTO sales_fact sf
+USING (
+  SELECT product_id, region_id, sale_date,
+         SUM(quantity) AS total_qty,
+         SUM(amount)   AS total_amt
+  FROM   sales_stg
+  GROUP BY product_id, region_id, sale_date
+) src
+ON    (sf.product_id = src.product_id
+   AND sf.region_id  = src.region_id
+   AND sf.sale_date  = src.sale_date)
+WHEN MATCHED THEN
+    UPDATE SET sf.total_qty = src.total_qty,
+               sf.total_amt = src.total_amt
+WHEN NOT MATCHED THEN
+    INSERT (product_id, region_id, sale_date, total_qty, total_amt)
+    VALUES (src.product_id, src.region_id, src.sale_date,
+            src.total_qty, src.total_amt);
+COMMIT;
+\`\`\`` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -4011,6 +4207,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch14: CH14_SECTIONS,
   ch15: CH15_SECTIONS,
   ch16: CH16_SECTIONS,
+  ch17: CH17_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
