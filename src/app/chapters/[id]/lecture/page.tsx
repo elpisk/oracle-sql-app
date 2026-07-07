@@ -3450,6 +3450,281 @@ FROM (SELECT department_id, job_id FROM employees WHERE department_id IS NOT NUL
 PIVOT (COUNT(*) FOR job_id IN ('SA_REP' AS 영업직, 'ST_CLERK' AS 물류직));` },
 ]
 
+const CH15_SECTIONS = [
+  { title: '1. MODEL 절 개요와 기본 구조', content: `MODEL 절은 SQL에서 스프레드시트(엑셀)처럼 배열 참조 방식으로 행 간 계산을 수행합니다. 복리 계산, 점화식, 시뮬레이션 등 이전 행의 결과를 다음 계산에 연쇄 사용하는 패턴에 특히 유용합니다.
+
+**기본 구문**
+\`\`\`sql
+SELECT ...
+FROM 테이블
+[WHERE ...]
+MODEL
+    [PARTITION BY (열)]
+    DIMENSION BY (열)
+    MEASURES (열 [AS 별칭], ...)
+    [RULES [옵션] (
+        measures_col[dim_val] = 표현식,
+        ...
+    )]
+[ORDER BY ...]
+\`\`\`
+
+**세 가지 핵심 절**
+| 절 | 역할 |
+|----|------|
+| PARTITION BY | 독립 처리 단위 (생략 시 전체가 하나의 파티션) |
+| DIMENSION BY | 각 셀(행)을 고유 식별하는 키 열 |
+| MEASURES | 계산하거나 참조할 값 열 |
+
+**실행 순서**: WHERE → GROUP BY → HAVING → MODEL → ORDER BY`, code: `-- MODEL 기본 구조
+SELECT yr, sales
+FROM annual_sales
+MODEL
+    DIMENSION BY (yr)
+    MEASURES     (sales)
+    RULES (
+        -- 2026년 행 추가 (2025년의 110%)
+        sales[2026] = sales[2025] * 1.1,
+        sales[2027] = sales[2026] * 1.1
+    )
+ORDER BY yr;
+
+-- DUAL을 사용한 새 데이터 생성
+SELECT n, n * n AS square
+FROM DUAL
+MODEL
+    DIMENSION BY (0 AS n)
+    MEASURES     (0 AS dummy)
+    RULES (
+        dummy[FOR n FROM 1 TO 5 INCREMENT 1] = CV(n)
+    )
+ORDER BY n;` },
+
+  { title: '2. DIMENSION BY와 MEASURES', content: `DIMENSION BY와 MEASURES의 역할 및 규칙(RULES) 작성 방법을 알아봅니다.
+
+**DIMENSION BY**
+- 각 행(셀)을 고유하게 식별하는 열 지정
+- 파티션 내에서 중복 차원 값 불허 (ORA-32638 오류)
+- 여러 열 조합 가능: DIMENSION BY (year, product_id)
+
+**MEASURES**
+- 계산 또는 참조할 값 열
+- 초기값 지정 가능: MEASURES (0 AS new_col)
+- 여러 열 동시 계산 가능
+
+**규칙(RULES) 기본 패턴**
+\`\`\`
+measures_col[차원값] = 표현식
+\`\`\`
+- **단일 셀**: sales[2025] = 50000
+- **멀티셀**: sales[year > 2024] = sales[CV(year)-1] * 1.1
+- **FOR 루프**: sales[FOR year FROM 2025 TO 2027] = ...
+
+**RULES 옵션**
+| 옵션 | 설명 |
+|------|------|
+| UPSERT ALL(기본) | 없으면 삽입, 있으면 갱신 |
+| UPDATE | 있는 행만 갱신 |
+| SEQUENTIAL ORDER(기본) | 작성 순서대로 실행 |
+| AUTOMATIC ORDER | 의존성 분석 후 자동 순서 |`, code: `-- 단일 셀 규칙
+MODEL DIMENSION BY (year) MEASURES (sales)
+RULES (sales[2027] = 100000);
+
+-- 멀티셀 규칙 (year > 2025인 모든 행)
+RULES (sales[year > 2025] = sales[CV(year)-1] * 1.05)
+
+-- FOR 루프
+RULES (
+    sales[FOR year FROM 2026 TO 2028 INCREMENT 1]
+        = sales[CV(year) - 1] * 1.1
+)
+
+-- RULES UPDATE: 기존 행만 갱신
+RULES UPDATE (
+    price['A'] = price['A'] * 1.1
+)
+
+-- RETURN UPDATED ROWS: 갱신/삽입된 행만 반환
+MODEL RETURN UPDATED ROWS
+    DIMENSION BY (yr) MEASURES (sales)
+    RULES (sales[2026] = sales[2025] * 1.1)` },
+
+  { title: '3. CV()와 IS PRESENT', content: `CV()와 IS PRESENT는 MODEL 규칙에서 현재 셀의 차원 값을 참조하고 셀 존재 여부를 확인하는 함수입니다.
+
+**CV(dimension_col)**
+- Current Value의 약자
+- FOR 루프나 멀티셀 규칙에서 현재 처리 중인 차원 값 반환
+- 예: CV(year) → 루프의 현재 연도값
+
+**IS PRESENT**
+\`\`\`
+measures_col[dim_val] IS PRESENT
+\`\`\`
+- 해당 차원 값의 셀이 결과에 존재하면 TRUE
+- 존재 여부에 따른 조건부 계산에 사용
+
+**집계 범위 참조**
+\`\`\`
+SUM(measures_col)[dim_col BETWEEN 시작 AND CV(dim_col)]
+\`\`\`
+누적 합계, 이동 평균 등 범위 집계 가능
+
+**IGNORE NAV vs KEEP NAV**
+| 옵션 | 없는 셀 참조 시 |
+|------|--------------|
+| KEEP NAV(기본) | NULL 반환 |
+| IGNORE NAV | 숫자=0, 문자=공백 반환 |`, code: `-- CV() 활용: 전달 대비 계산
+SELECT mth, revenue, prev_rev
+FROM monthly_data
+MODEL DIMENSION BY (mth) MEASURES (revenue, 0 AS prev_rev)
+RULES (
+    prev_rev[mth > 1] = revenue[CV(mth) - 1]
+);
+
+-- IS PRESENT: 셀 존재 시에만 계산
+RULES (
+    result[n IS NOT NULL] =
+        CASE WHEN val[CV(n) - 1] IS PRESENT
+             THEN val[CV(n)] + val[CV(n) - 1]
+             ELSE val[CV(n)]
+        END
+)
+
+-- 집계 범위 참조: 누적 합계
+RULES (
+    cum_sales[yr IS NOT NULL] =
+        SUM(sales)[yr BETWEEN 2020 AND CV(yr)]
+)
+
+-- IGNORE NAV: 없는 셀 = 0
+MODEL IGNORE NAV
+    DIMENSION BY (mth) MEASURES (sales, 0 AS diff)
+    RULES (diff[mth >= 1] = sales[CV(mth)] - sales[CV(mth)-1])` },
+
+  { title: '4. ITERATE와 반복 계산', content: `ITERATE는 규칙 블록을 지정 횟수만큼 반복 실행합니다. 시뮬레이션, 수렴 계산, 점화식 등에 활용합니다.
+
+**ITERATE 구문**
+\`\`\`sql
+RULES ITERATE(n) [UNTIL (조건)] (
+    규칙들
+)
+\`\`\`
+- ITERATE(n): 최대 n번 반복
+- UNTIL(조건): 조건 만족 시 조기 종료
+- ITERATION_NUMBER: 현재 반복 횟수 (0부터 시작)
+
+**ITERATION_NUMBER 활용**
+\`\`\`
+balance[ITERATION_NUMBER + 1]
+    = balance[ITERATION_NUMBER] * (1 + rate)
+\`\`\`
+
+**복리 계산 패턴**
+\`\`\`sql
+SELECT yr, ROUND(balance, 0)
+FROM DUAL
+MODEL
+    DIMENSION BY (0 AS yr)
+    MEASURES (원금 AS balance)
+    RULES (
+        balance[FOR yr FROM 1 TO n] =
+            balance[CV(yr)-1] * (1 + rate)
+    )
+\`\`\`
+
+**피보나치 점화식 패턴**
+f(n) = f(n-1) + f(n-2)
+→ SEQUENTIAL ORDER로 이전 값을 순서대로 계산`, code: `-- 복리 계산 (5년, 연 5%)
+SELECT yr, ROUND(balance, 0)
+FROM DUAL
+MODEL DIMENSION BY (0 AS yr) MEASURES (1000000 AS balance)
+RULES (
+    balance[FOR yr FROM 1 TO 5 INCREMENT 1]
+        = balance[CV(yr)-1] * 1.05
+)
+ORDER BY yr;
+
+-- ITERATE + ITERATION_NUMBER
+SELECT n, val FROM DUAL
+MODEL DIMENSION BY (1 AS n) MEASURES (1 AS val)
+RULES ITERATE(10) (
+    val[ITERATION_NUMBER+1] = val[ITERATION_NUMBER] * 2
+)
+ORDER BY n;
+
+-- UNTIL 조기 종료
+MODEL RULES ITERATE(1000) UNTIL (ABS(x[0] - target) < 0.01) (
+    x[ITERATION_NUMBER+1] = x[ITERATION_NUMBER] + step
+)
+
+-- 피보나치
+RULES SEQUENTIAL ORDER (
+    fib[1] = 1, fib[2] = 1,
+    fib[FOR n FROM 3 TO 10]
+        = fib[CV(n)-1] + fib[CV(n)-2]
+)` },
+
+  { title: '5. PARTITION BY와 참조 모델', content: `PARTITION BY와 참조 모델(Reference Model)을 사용하여 복잡한 분석을 수행하는 방법을 알아봅니다.
+
+**PARTITION BY**
+- 데이터를 독립적인 파티션으로 분할
+- 각 파티션 내에서 DIMENSION BY가 고유 식별
+- 예: 제품별, 지역별 독립 예측
+
+**참조 모델(Reference Model)**
+\`\`\`sql
+MODEL
+    REFERENCE ref_name
+        ON (서브쿼리)
+        DIMENSION BY (...)
+        MEASURES (...)
+    MAIN main_name
+        PARTITION BY (...)
+        DIMENSION BY (...)
+        MEASURES (...)
+        RULES (
+            -- ref_name.measure_col[dim_val]로 참조
+            result[yr] = main_val[yr] * ref_name.rate[yr]
+        )
+\`\`\`
+- 읽기 전용 외부 데이터 참조
+- 주 모델 규칙에서 ref_name.열[차원]으로 접근
+
+**MODEL vs 분석 함수 선택**
+| 상황 | 권장 |
+|------|------|
+| N행 이전 단순 조회 | 분석 함수 (LAG) |
+| 계산 결과를 연쇄 참조 | MODEL |
+| 복리/점화식/시뮬레이션 | MODEL |`, code: `-- PARTITION BY: 제품별 독립 예측
+SELECT product_id, yr, sales
+FROM product_sales
+MODEL
+    PARTITION BY (product_id)
+    DIMENSION BY (yr)
+    MEASURES     (sales)
+    RULES (
+        sales[2027] = sales[2026] * 1.1
+    )
+ORDER BY product_id, yr;
+
+-- 참조 모델 패턴
+SELECT yr, main_sales, growth_rate
+FROM (SELECT yr, sales AS main_sales FROM main_table)
+MODEL
+    REFERENCE rate_ref
+        ON (SELECT yr, rate FROM growth_rates)
+        DIMENSION BY (yr)
+        MEASURES (rate)
+    MAIN main_m
+        DIMENSION BY (yr)
+        MEASURES (main_sales)
+        RULES (
+            main_sales[yr > 2025]
+                = main_sales[CV(yr)-1] * (1 + rate_ref.rate[CV(yr)])
+        )
+ORDER BY yr;` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -3465,6 +3740,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch12: CH12_SECTIONS,
   ch13: CH13_SECTIONS,
   ch14: CH14_SECTIONS,
+  ch15: CH15_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
