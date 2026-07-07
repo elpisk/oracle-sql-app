@@ -82,7 +82,7 @@ export default function HomePage() {
             <span className="text-[13px] text-apple-secondary">{CONTENT_READY.length}개 챕터</span>
           </div>
           <div className="grid sm:grid-cols-3 gap-4">
-            {CHAPTERS.filter(c => CONTENT_READY.includes(c.id)).map(ch => {
+            {CHAPTERS.filter(c => CONTENT_READY.slice(-5).includes(c.id)).map(ch => {
               const prog = getProgress(ch.id)
               const best = getBestScore(ch.id)
               return (
