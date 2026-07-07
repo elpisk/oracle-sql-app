@@ -4190,6 +4190,182 @@ COMMIT;
 \`\`\`` },
 ]
 
+const CH18_SECTIONS = [
+  { title: '1. 다중 테이블 INSERT 개요', content: `다중 테이블 INSERT(Multitable INSERT)는 단일 DML 문으로 하나의 소스(SELECT)에서 여러 대상 테이블에 행을 삽입합니다. 데이터 웨어하우스 ETL에서 소스를 한 번만 읽어 여러 테이블에 분배하는 데 최적화되어 있습니다.
+
+**공통 구문**
+\`\`\`sql
+INSERT [ ALL | FIRST ]
+    [ WHEN 조건 THEN ]
+    INTO 대상_테이블 [(열_목록)] [VALUES (값_목록)]
+    ...
+    [ ELSE INTO 대상_테이블 ... ]
+SELECT 열
+FROM   소스_테이블;
+\`\`\`
+
+**다중 테이블 INSERT 종류**
+| 유형 | 키워드 | 특징 |
+|------|--------|------|
+| Unconditional INSERT ALL | INSERT ALL (WHEN 없음) | 조건 없이 모든 INTO 절에 삽입 |
+| Conditional INSERT ALL | INSERT ALL WHEN | 만족하는 모든 INTO에 삽입(중복 가능) |
+| Conditional INSERT FIRST | INSERT FIRST WHEN | 첫 번째 만족 조건에만 삽입 |
+| Pivoting INSERT | INSERT ALL (같은 테이블 반복) | 열 기반 → 행 기반 변환 삽입 |
+
+**공통 특징**
+- DML → 명시적 COMMIT 필요, ROLLBACK 가능
+- 소스 데이터를 단일 패스(Single-pass)로 읽어 성능 효율적
+- RETURNING 절 미지원
+- 트리거: 각 INTO 절 테이블의 INSERT 트리거 발화` },
+  { title: '2. Unconditional INSERT ALL', content: `조건 없이 소스의 모든 행을 모든 INTO 절에 삽입합니다. 소스 M행 × INTO N개 = M×N행 총 삽입.
+
+**기본 예제 — 두 테이블에 동시 삽입**
+\`\`\`sql
+-- employee_id > 200인 직원을 sal_history와 mgr_history에 동시 삽입
+INSERT ALL
+    INTO sal_history VALUES (empid, hiredate, sal)
+    INTO mgr_history VALUES (empid, mgr, sal)
+SELECT employee_id empid,
+       hire_date   hiredate,
+       salary      sal,
+       manager_id  mgr
+FROM   employees
+WHERE  employee_id > 200;
+\`\`\`
+
+**포인트**
+- SELECT 별칭(empid, hiredate, sal, mgr)을 VALUES에서 참조
+- 소스 행 수 × INTO 절 수 = 총 삽입 행 수
+- 동일한 테이블을 여러 INTO 절에 지정 가능
+
+**열 목록 지정**
+\`\`\`sql
+INSERT ALL
+    INTO emp_full    (employee_id, last_name, salary)
+    VALUES           (employee_id, last_name, salary)
+    INTO emp_archive (employee_id, hire_date)
+    VALUES           (employee_id, hire_date)
+SELECT employee_id, last_name, salary, hire_date
+FROM   employees;
+\`\`\`
+
+**APPEND 힌트 (대용량)**
+\`\`\`sql
+INSERT /*+ APPEND */ ALL
+    INTO emp_backup VALUES (employee_id, last_name, salary)
+SELECT employee_id, last_name, salary FROM employees;
+COMMIT;
+\`\`\`` },
+  { title: '3. Conditional INSERT ALL', content: `WHEN 조건을 추가하여 소스의 각 행에 대해 **모든 WHEN 조건을 독립적으로 평가**합니다. 한 행이 여러 조건을 만족하면 여러 INTO 절 모두에 삽입됩니다.
+
+**기본 예제**
+\`\`\`sql
+INSERT ALL
+    WHEN hiredate < DATE '2015-01-01' THEN
+        INTO emp_history VALUES (empid, hiredate, sal)
+    WHEN comm IS NOT NULL THEN
+        INTO emp_sales VALUES (empid, comm, sal)
+SELECT employee_id empid, hire_date hiredate,
+       salary sal, commission_pct comm
+FROM   employees;
+\`\`\`
+
+**ELSE 절 (어떤 조건도 불만족 시)**
+\`\`\`sql
+INSERT ALL
+    WHEN sal >= 10000 THEN INTO high_earners VALUES (empid, sal)
+    WHEN dept = 50   THEN INTO shipping_dept VALUES (empid, dept)
+    ELSE                  INTO others         VALUES (empid, sal, dept)
+SELECT employee_id empid, salary sal, department_id dept
+FROM   employees;
+\`\`\`
+
+**INSERT ALL vs INSERT FIRST 비교**
+| 항목 | INSERT ALL | INSERT FIRST |
+|------|-----------|--------------|
+| 조건 평가 | 모든 WHEN 평가 | 첫 번째 만족 후 중단 |
+| 중복 삽입 | 가능 (여러 테이블에) | 불가 (최대 1개 테이블) |
+| 총 삽입 행 수 | 소스 행 수 이상 가능 | 소스 행 수 이하 |
+| 용도 | 동시 복사, 중복 허용 분류 | 상호 배타적 분류 |` },
+  { title: '4. Conditional INSERT FIRST', content: `WHEN 조건을 순서대로 평가하여 **첫 번째로 만족하는 INTO 절에만** 삽입하고 나머지 조건 평가를 중단합니다. 각 행은 최대 하나의 테이블에만 삽입됩니다.
+
+**기본 예제 — 급여 구간 분류**
+\`\`\`sql
+INSERT FIRST
+    WHEN salary < 5000 THEN
+        INTO sal_low  VALUES (employee_id, last_name, salary)
+    WHEN salary BETWEEN 5000 AND 10000 THEN
+        INTO sal_mid  VALUES (employee_id, last_name, salary)
+    ELSE
+        INTO sal_high VALUES (employee_id, last_name, salary)
+SELECT employee_id, last_name, salary
+FROM   employees;
+\`\`\`
+
+**중요 동작 차이**
+\`\`\`sql
+-- salary=4500, commission_pct=0.1인 직원의 경우:
+
+-- INSERT ALL → low_sal과 comm_emp 모두 삽입
+INSERT ALL
+    WHEN salary < 5000 THEN INTO low_sal  VALUES (employee_id, salary)
+    WHEN commission_pct IS NOT NULL THEN INTO comm_emp VALUES (employee_id, commission_pct)
+SELECT employee_id, salary, commission_pct FROM employees;
+
+-- INSERT FIRST → low_sal에만 삽입 (첫 번째 조건 만족 후 중단)
+INSERT FIRST
+    WHEN salary < 5000 THEN INTO low_sal  VALUES (employee_id, salary)
+    WHEN commission_pct IS NOT NULL THEN INTO comm_emp VALUES (employee_id, commission_pct)
+SELECT employee_id, salary, commission_pct FROM employees;
+\`\`\`
+
+**활용 사례**
+- 급여/나이/날짜 범위별 상호 배타적 분류
+- 우선순위 기반 라우팅 (첫 번째 조건이 가장 높은 우선순위)
+- ETL에서 중복 없이 단일 대상으로 분배` },
+  { title: '5. Pivoting INSERT', content: `열 기반(가로) 데이터를 행 기반(세로) 관계형 데이터로 변환하여 삽입합니다. 같은 테이블을 여러 INTO 절에 반복 지정하는 패턴을 사용합니다.
+
+**Pivoting INSERT 개념**
+\`\`\`
+소스 (열 기반):            변환 후 (행 기반):
+EMP_ID WEEK MON TUE WED   EMP_ID WEEK SALES
+176    6    2000 3000 4000  176    6    2000   ← MON
+                            176    6    3000   ← TUE
+                            176    6    4000   ← WED
+\`\`\`
+
+**기본 Pivoting INSERT**
+\`\`\`sql
+INSERT ALL
+    INTO sales_info VALUES (employee_id, week_id, sales_mon)
+    INTO sales_info VALUES (employee_id, week_id, sales_tue)
+    INTO sales_info VALUES (employee_id, week_id, sales_wed)
+    INTO sales_info VALUES (employee_id, week_id, sales_thur)
+    INTO sales_info VALUES (employee_id, week_id, sales_fri)
+SELECT employee_id, week_id,
+       sales_mon, sales_tue, sales_wed, sales_thur, sales_fri
+FROM   sales_source_data;
+\`\`\`
+
+**NULL 제외 + 레이블 포함 패턴**
+\`\`\`sql
+INSERT ALL
+    WHEN sales_mon IS NOT NULL THEN
+        INTO sales_detail VALUES (employee_id, week_id, 'MON', sales_mon)
+    WHEN sales_tue IS NOT NULL THEN
+        INTO sales_detail VALUES (employee_id, week_id, 'TUE', sales_tue)
+    WHEN sales_wed IS NOT NULL THEN
+        INTO sales_detail VALUES (employee_id, week_id, 'WED', sales_wed)
+SELECT employee_id, week_id, sales_mon, sales_tue, sales_wed
+FROM   sales_source_data;
+\`\`\`
+
+**적용 사례**
+- 요일별/분기별 실적 열 → 날짜별 행 변환
+- 비정규화된 flat 파일 데이터를 정규화된 테이블로 변환
+- ETL 스테이징 → 팩트 테이블 로드` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -4208,6 +4384,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch15: CH15_SECTIONS,
   ch16: CH16_SECTIONS,
   ch17: CH17_SECTIONS,
+  ch18: CH18_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
