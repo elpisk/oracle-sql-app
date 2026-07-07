@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BookOpen, Home, MessageSquare, User } from 'lucide-react'
+import { BookOpen, Home, MessageSquare, User, ShieldCheck } from 'lucide-react'
 
 const links = [
   { href: '/',            label: '홈',     icon: Home },
@@ -40,11 +40,18 @@ export default function Nav() {
           })}
         </nav>
 
-        {/* 프로필 */}
-        <Link href="/profile/setup"
-          className="w-8 h-8 rounded-full bg-apple-gray-bg flex items-center justify-center hover:bg-apple-border transition-colors">
-          <User size={16} className="text-apple-secondary" />
-        </Link>
+        {/* 우측 아이콘 */}
+        <div className="flex items-center gap-1">
+          <Link href="/admin"
+            className="w-8 h-8 rounded-full bg-apple-gray-bg flex items-center justify-center hover:bg-apple-border transition-colors"
+            title="관리자">
+            <ShieldCheck size={15} className="text-apple-secondary" />
+          </Link>
+          <Link href="/profile/setup"
+            className="w-8 h-8 rounded-full bg-apple-gray-bg flex items-center justify-center hover:bg-apple-border transition-colors">
+            <User size={16} className="text-apple-secondary" />
+          </Link>
+        </div>
       </div>
     </header>
   )

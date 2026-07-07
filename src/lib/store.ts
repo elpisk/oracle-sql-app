@@ -86,6 +86,29 @@ export const saveInquiry = (inquiry: Omit<Inquiry, 'id' | 'createdAt' | 'status'
   set(KEYS.inquiries, all)
 }
 
+/* Admin */
+export const getAdminAuth = (): boolean => get<boolean>('ora_admin_auth') ?? false
+export const setAdminAuth = (v: boolean): void => set('ora_admin_auth', v)
+
+export const answerInquiry = (id: string, answer: string): void => {
+  const all = getInquiries()
+  const idx = all.findIndex(i => i.id === id)
+  if (idx < 0) return
+  all[idx] = { ...all[idx], answer, status: 'answered' }
+  set(KEYS.inquiries, all)
+}
+
+export const deleteInquiry = (id: string): void => {
+  const filtered = getInquiries().filter(i => i.id !== id)
+  set(KEYS.inquiries, filtered)
+}
+
+export const getHiddenChapters = (): string[] =>
+  get<string[]>('ora_hidden_chapters') ?? []
+
+export const setHiddenChapters = (ids: string[]): void =>
+  set('ora_hidden_chapters', ids)
+
 /* Stats */
 export const getStats = () => {
   const progress = getAllProgress()
