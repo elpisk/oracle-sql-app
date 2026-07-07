@@ -3725,6 +3725,275 @@ MODEL
 ORDER BY yr;` },
 ]
 
+const CH16_SECTIONS = [
+  { title: '1. Flashback 기술 개요와 UNDO 데이터', content: `Oracle Flashback 기술은 UNDO(실행 취소) 데이터를 활용하여 DML 실수를 신속하게 복구하는 기능입니다. 전통적인 백업/복구보다 훨씬 빠르고 간단하게 데이터를 원복할 수 있습니다.
+
+**Flashback 기술 종류**
+| 기능 | 저장 기반 | 범위 | 목적 |
+|------|-----------|------|------|
+| Flashback Query (AS OF) | UNDO | 테이블 | 과거 데이터 조회(읽기 전용) |
+| Flashback Version Query | UNDO | 행 | 행 변경 이력 추적 |
+| FLASHBACK TABLE | UNDO | 테이블 | 테이블 DML 복구 |
+| Flashback Drop | RECYCLEBIN | 테이블 | DROP된 테이블 복구 |
+| Flashback Database | Flashback Log | DB 전체 | 데이터베이스 전체 복구 |
+
+**UNDO 데이터 보존**
+\`\`\`sql
+-- UNDO 보존 기간 설정 (초 단위, 기본 900초)
+ALTER SYSTEM SET UNDO_RETENTION = 3600;
+
+-- 현재 SCN 조회
+SELECT current_scn FROM v$database;
+SELECT dbms_flashback.get_system_change_number FROM dual;
+
+-- SCN ↔ TIMESTAMP 변환
+SELECT scn_to_timestamp(current_scn) FROM v$database;
+SELECT timestamp_to_scn(SYSTIMESTAMP) FROM dual;
+\`\`\`
+
+UNDO_RETENTION은 힌트이므로 공간 부족 시 조기 삭제될 수 있습니다. 보장이 필요하면:
+\`\`\`sql
+ALTER TABLESPACE undotbs1 RETENTION GUARANTEE;
+\`\`\`` },
+  { title: '2. Flashback Query (AS OF TIMESTAMP/SCN)', content: `Flashback Query는 테이블 원본을 변경하지 않고 과거 특정 시점의 데이터를 SELECT로 조회합니다.
+
+**AS OF TIMESTAMP 구문**
+\`\`\`sql
+-- 기본 형태
+SELECT 열
+FROM   테이블
+AS OF TIMESTAMP 표현식
+[WHERE 조건];
+
+-- 30분 전 데이터 조회
+SELECT employee_id, salary
+FROM   employees
+AS OF TIMESTAMP (SYSTIMESTAMP - INTERVAL '30' MINUTE)
+WHERE  employee_id = 100;
+
+-- 특정 절대 시각 지정
+SELECT *
+FROM   orders
+AS OF TIMESTAMP TO_TIMESTAMP('2024-01-15 09:00:00', 'YYYY-MM-DD HH24:MI:SS');
+\`\`\`
+
+**AS OF SCN 구문**
+\`\`\`sql
+-- SCN으로 더 정확한 시점 지정
+SELECT salary
+FROM   employees
+AS OF SCN 12345
+WHERE  employee_id = 100;
+\`\`\`
+
+**현재 vs 과거 비교 (조인 활용)**
+\`\`\`sql
+SELECT cur.employee_id,
+       old.salary AS before_salary,
+       cur.salary AS current_salary
+FROM   employees cur
+JOIN   employees AS OF TIMESTAMP (SYSTIMESTAMP - INTERVAL '1' HOUR) old
+       ON cur.employee_id = old.employee_id
+WHERE  cur.salary <> old.salary;
+\`\`\`
+
+**삭제된 행 복원**
+\`\`\`sql
+-- AS OF로 삭제 전 데이터 확인 후 INSERT
+INSERT INTO employees
+SELECT *
+FROM   employees
+AS OF TIMESTAMP (SYSTIMESTAMP - INTERVAL '30' MINUTE)
+WHERE  employee_id = 999;
+COMMIT;
+\`\`\`` },
+  { title: '3. Flashback Version Query (VERSIONS BETWEEN)', content: `Flashback Version Query는 특정 기간 동안 행이 어떻게 변경되었는지 이력을 추적합니다. 각 버전(변경 시점)을 행으로 반환합니다.
+
+**기본 구문**
+\`\`\`sql
+SELECT 의사컬럼, 일반열
+FROM   테이블
+VERSIONS BETWEEN {TIMESTAMP | SCN} 시작 AND 끝
+[WHERE 조건];
+\`\`\`
+
+**주요 의사 컬럼(Pseudo Column)**
+| 의사 컬럼 | 설명 |
+|-----------|------|
+| VERSIONS_STARTTIME | 해당 버전 시작 시각 (NULL=범위 시작 이전부터 존재) |
+| VERSIONS_ENDTIME | 해당 버전 종료 시각 (NULL=현재 유효한 최신 버전) |
+| VERSIONS_STARTSCN | 해당 버전 시작 SCN |
+| VERSIONS_ENDSCN | 해당 버전 종료 SCN |
+| VERSIONS_OPERATION | I(INSERT), U(UPDATE), D(DELETE) |
+| VERSIONS_XID | 트랜잭션 ID (FLASHBACK_TRANSACTION_QUERY 연계) |
+
+**사용 예시**
+\`\`\`sql
+-- 지난 2시간 내 salary 변경 이력
+SELECT versions_starttime,
+       versions_endtime,
+       versions_operation,
+       salary
+FROM   employees
+VERSIONS BETWEEN TIMESTAMP
+       (SYSTIMESTAMP - INTERVAL '2' HOUR) AND SYSTIMESTAMP
+WHERE  employee_id = 100;
+
+-- UNDO에 남아 있는 전체 이력
+SELECT versions_startscn, versions_endscn,
+       versions_operation, versions_xid, salary
+FROM   employees
+VERSIONS BETWEEN SCN MINVALUE AND MAXVALUE
+WHERE  last_name = 'King';
+
+-- 오늘 DELETE된 행 추적
+SELECT versions_starttime AS deleted_time,
+       product_id, product_name
+FROM   products
+VERSIONS BETWEEN TIMESTAMP TRUNC(SYSDATE) AND SYSTIMESTAMP
+WHERE  versions_operation = 'D';
+\`\`\`` },
+  { title: '4. FLASHBACK TABLE 문 (DML 복구)', content: `FLASHBACK TABLE은 테이블 데이터를 특정 과거 시점이나 SCN으로 실제 복구합니다. 관련 인덱스와 제약도 함께 복원됩니다.
+
+**사전 조건 및 구문**
+\`\`\`sql
+-- 1. ROW MOVEMENT 활성화 (TIMESTAMP 기반 복구 필수)
+ALTER TABLE employees ENABLE ROW MOVEMENT;
+
+-- 2. TIMESTAMP 기반 복구
+FLASHBACK TABLE employees
+TO TIMESTAMP (SYSTIMESTAMP - INTERVAL '30' MINUTE);
+
+-- 3. SCN 기반 복구
+FLASHBACK TABLE orders TO SCN 12345;
+
+-- 4. 트리거 활성화 옵션 (기본: 트리거 비활성화)
+FLASHBACK TABLE employees
+TO TIMESTAMP (SYSTIMESTAMP - INTERVAL '1' HOUR)
+ENABLE TRIGGERS;
+\`\`\`
+
+**주의사항**
+| 항목 | 내용 |
+|------|------|
+| DDL 변경 전 시점 | 복구 불가 (ALTER TABLE, TRUNCATE 이전) |
+| UNDO 만료 | ORA-01555 스냅숏 너무 오래됨 오류 발생 |
+| 트리거 | 기본 비활성화, ENABLE TRIGGERS로 활성화 가능 |
+| 권한 | FLASHBACK ANY TABLE 또는 테이블 소유자 권한 |
+
+**선택적 복원 (특정 행만)**
+\`\`\`sql
+-- UPDATE 실수 복원 (MERGE 활용)
+MERGE INTO employees cur
+USING (
+  SELECT employee_id, salary
+  FROM   employees
+  AS OF TIMESTAMP (SYSTIMESTAMP - INTERVAL '1' HOUR)
+) old
+ON (cur.employee_id = old.employee_id)
+WHEN MATCHED THEN
+  UPDATE SET cur.salary = old.salary;
+COMMIT;
+\`\`\`` },
+  { title: '5. Flashback Drop과 RECYCLEBIN 관리', content: `DROP TABLE 시 테이블은 즉시 삭제되지 않고 RECYCLEBIN으로 이동합니다. RECYCLEBIN에서 복구하는 기능이 Flashback Drop입니다.
+
+**RECYCLEBIN 조회**
+\`\`\`sql
+-- 현재 사용자의 RECYCLEBIN
+SELECT original_name, object_name, type, droptime
+FROM   recyclebin
+ORDER BY droptime DESC;
+
+-- SQL*Plus 명령
+SHOW RECYCLEBIN
+\`\`\`
+
+**Flashback Drop — 테이블 복구**
+\`\`\`sql
+-- 원래 이름으로 복구
+FLASHBACK TABLE emp TO BEFORE DROP;
+
+-- 다른 이름으로 복구 (원래 이름이 이미 존재하는 경우)
+FLASHBACK TABLE emp TO BEFORE DROP RENAME TO emp_old;
+
+-- 같은 이름이 여러 개: OBJECT_NAME(BIN$...) 직접 사용
+FLASHBACK TABLE "BIN$xxxxxxxxxxxxx" TO BEFORE DROP;
+\`\`\`
+
+**RECYCLEBIN 관리 (PURGE)**
+\`\`\`sql
+-- 특정 테이블 영구 삭제
+PURGE TABLE old_emp;
+
+-- 현재 사용자의 RECYCLEBIN 전체 비우기
+PURGE RECYCLEBIN;
+
+-- DBA: 모든 사용자의 RECYCLEBIN 비우기
+PURGE DBA_RECYCLEBIN;
+
+-- 처음부터 RECYCLEBIN에 넣지 않고 즉시 삭제
+DROP TABLE t PURGE;
+\`\`\`
+
+**FLASHBACK TABLE TO BEFORE DROP vs TO TIMESTAMP**
+| 구분 | Flashback Drop | FLASHBACK TABLE TO TIMESTAMP |
+|------|----------------|------------------------------|
+| 저장소 | RECYCLEBIN | UNDO 테이블스페이스 |
+| ROW MOVEMENT | 불필요 | 필요 |
+| 시간 제한 | RECYCLEBIN 공간 있을 때까지 | UNDO_RETENTION 기간 |
+| 복구 대상 | DROP 실수 | DML(UPDATE/DELETE) 실수 |` },
+  { title: '6. Flashback Transaction Query와 종합 활용', content: `Flashback Version Query와 연계하여 특정 트랜잭션의 UNDO SQL을 조회하고 변경을 역전할 수 있습니다.
+
+**FLASHBACK_TRANSACTION_QUERY 활용**
+\`\`\`sql
+-- 1단계: Flashback Version Query로 XID 확인
+SELECT versions_xid, versions_operation, salary
+FROM   employees
+VERSIONS BETWEEN SCN MINVALUE AND MAXVALUE
+WHERE  employee_id = 100
+ORDER BY versions_startscn DESC;
+
+-- 2단계: XID로 UNDO SQL 조회
+SELECT operation, table_name, undo_sql
+FROM   flashback_transaction_query
+WHERE  xid = HEXTORAW('앞서_찾은_XID');
+-- undo_sql을 실행하면 해당 변경을 역전 가능
+\`\`\`
+
+**종합 복구 시나리오**
+\`\`\`sql
+-- 시나리오: 중요 작업 전 SCN 저장
+SELECT current_scn FROM v$database;  -- 예: 12345
+
+-- UPDATE 실수 후 복구 흐름
+-- ① 과거 값 확인
+SELECT salary FROM employees AS OF SCN 12345 WHERE employee_id = 100;
+
+-- ② 변경 이력 추적
+SELECT versions_startscn, versions_operation, salary
+FROM   employees
+VERSIONS BETWEEN SCN 12345 AND MAXVALUE
+WHERE  employee_id = 100;
+
+-- ③ FLASHBACK TABLE로 원복
+ALTER TABLE employees ENABLE ROW MOVEMENT;
+FLASHBACK TABLE employees TO SCN 12345;
+
+-- ④ ROW MOVEMENT 비활성화 (선택)
+ALTER TABLE employees DISABLE ROW MOVEMENT;
+\`\`\`
+
+**Flashback 기능 선택 가이드**
+\`\`\`
+특정 시점 데이터 확인만 필요 → AS OF TIMESTAMP/SCN
+행 변경 이력 추적 필요     → VERSIONS BETWEEN
+특정 행만 선택적 복원      → AS OF + INSERT/MERGE
+테이블 전체 복구           → FLASHBACK TABLE TO TIMESTAMP/SCN
+DROP된 테이블 복구         → FLASHBACK TABLE TO BEFORE DROP
+데이터베이스 전체 복구     → FLASHBACK DATABASE (DBA 작업)
+\`\`\`` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -3741,6 +4010,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch13: CH13_SECTIONS,
   ch14: CH14_SECTIONS,
   ch15: CH15_SECTIONS,
+  ch16: CH16_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,
