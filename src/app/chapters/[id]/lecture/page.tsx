@@ -4613,6 +4613,194 @@ WHERE EXISTS (SELECT NULL FROM employees WHERE department_id = d.department_id);
 \`\`\`` },
 ]
 
+const CH20_SECTIONS = [
+  { title: '1. 시간대(Time Zone) 개요', content: `글로벌 환경에서는 서버 위치와 관계없이 사용자의 현지 시간대로 시각을 기록해야 합니다. Oracle은 세션 단위로 시간대를 설정하는 기능을 제공합니다.
+
+**E-Commerce 시나리오**
+\`\`\`
+호주 고객 Rick → 주문 입력 → OracleKart DB 서버 (미국)
+현지 시각 필요             DB 서버 시각으로 저장하면 안 됨
+\`\`\`
+
+**세션 시간대 설정 (ALTER SESSION)**
+\`\`\`sql
+-- 절대 오프셋
+ALTER SESSION SET TIME_ZONE = '-05:00';
+
+-- DB 시간대와 동일하게
+ALTER SESSION SET TIME_ZONE = dbtimezone;
+
+-- OS 로컬 시간대
+ALTER SESSION SET TIME_ZONE = local;
+
+-- 지역명
+ALTER SESSION SET TIME_ZONE = 'America/New_York';
+\`\`\`
+
+**DB·세션 시간대 조회**
+\`\`\`sql
+SELECT DBTIMEZONE   FROM DUAL;   -- DB 서버 시간대
+SELECT SESSIONTIMEZONE FROM DUAL; -- 현재 세션 시간대
+\`\`\`
+
+| 함수 | 설명 |
+|------|------|
+| \`DBTIMEZONE\` | 데이터베이스 서버의 시간대 오프셋 |
+| \`SESSIONTIMEZONE\` | 현재 세션의 시간대 (ALTER SESSION으로 변경 가능) |` },
+
+  { title: '2. CURRENT_DATE, CURRENT_TIMESTAMP, LOCALTIMESTAMP', content: `세 함수는 모두 세션 시간대 기준 현재 시각을 반환하지만 반환 타입이 다릅니다.
+
+| 함수 | 반환 타입 | 시간대 포함 |
+|------|-----------|------------|
+| \`CURRENT_DATE\` | DATE | 없음 |
+| \`CURRENT_TIMESTAMP\` | TIMESTAMP WITH TIME ZONE | 있음 (오프셋 포함) |
+| \`LOCALTIMESTAMP\` | TIMESTAMP | 없음 |
+
+**비교 예제**
+\`\`\`sql
+ALTER SESSION SET NLS_DATE_FORMAT = 'DD-MON-YYYY HH24:MI:SS';
+ALTER SESSION SET TIME_ZONE = '-5:00';
+
+SELECT SESSIONTIMEZONE,
+       CURRENT_DATE,        -- DATE: 시간대 없음
+       CURRENT_TIMESTAMP,   -- TIMESTAMP WITH TZ: -05:00 포함
+       LOCALTIMESTAMP       -- TIMESTAMP: 시간대 없음
+FROM DUAL;
+\`\`\`
+
+**SYSDATE와의 차이**
+\`\`\`sql
+SELECT SYSDATE,       -- DB 서버 시간대 기준
+       CURRENT_DATE   -- 세션 시간대 기준
+FROM DUAL;
+-- DB가 UTC이고 세션이 -05:00이면 5시간 차이 발생
+\`\`\`` },
+
+  { title: '3. TIMESTAMP 데이터 타입 3종', content: `DATE의 한계(초 단위까지)를 극복한 확장 타입으로 소수점 초와 시간대 정보를 저장합니다.
+
+**TIMESTAMP 3종 비교**
+| 데이터 타입 | 저장 내용 | 조회 표시 |
+|-------------|-----------|-----------|
+| \`TIMESTAMP\` | 소수점 초 포함 날짜+시간 | 시간대 없이 표시 |
+| \`TIMESTAMP WITH TIME ZONE\` | + 시간대 오프셋 또는 지역명 | 저장된 시간대 그대로 표시 |
+| \`TIMESTAMP WITH LOCAL TIME ZONE\` | + DB TZ로 정규화하여 저장 | 세션 TZ로 자동 변환 표시 |
+
+**유효 범위 (TIMEZONE_HOUR: -12 ~ 14)**
+
+**사용 예제**
+\`\`\`sql
+CREATE TABLE web_orders (
+    order_date    TIMESTAMP WITH TIME ZONE,
+    delivery_time TIMESTAMP WITH LOCAL TIME ZONE
+);
+
+INSERT INTO web_orders VALUES (CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + 2);
+\`\`\`
+
+**WITH LOCAL TIME ZONE 동작 원리**
+\`\`\`
+서울(+9) 세션에서 입력 → DB에 UTC로 정규화 저장
+뉴욕(-5) 세션에서 조회 → 뉴욕 시각으로 자동 변환 표시
+\`\`\`` },
+
+  { title: '4. INTERVAL 데이터 타입', content: `두 날짜/시간 값 사이의 **기간(간격)**을 저장하는 타입입니다.
+
+**INTERVAL 2종**
+| 타입 | 필드 | 용도 |
+|------|------|------|
+| \`INTERVAL YEAR TO MONTH\` | YEAR, MONTH | 연·월 단위 기간 |
+| \`INTERVAL DAY TO SECOND\` | DAY, HOUR, MINUTE, SECOND | 일·시·분·초 단위 기간 |
+
+**INTERVAL YEAR TO MONTH**
+\`\`\`sql
+CREATE TABLE warranty (
+    prod_id       NUMBER,
+    warranty_time INTERVAL YEAR(3) TO MONTH
+);
+
+INSERT INTO warranty VALUES (123, INTERVAL '8' MONTH);       -- 8개월
+INSERT INTO warranty VALUES (155, INTERVAL '200' YEAR(3));   -- 200년
+INSERT INTO warranty VALUES (678, '200-11');                  -- 200년 11개월
+\`\`\`
+
+**INTERVAL DAY TO SECOND**
+\`\`\`sql
+CREATE TABLE lab (
+    exp_id    NUMBER,
+    test_time INTERVAL DAY(2) TO SECOND
+);
+
+INSERT INTO lab VALUES (100012, '90 00:00:00');                    -- 90일
+INSERT INTO lab VALUES (56098, INTERVAL '6 03:30:16' DAY TO SECOND); -- 6일 3시간 30분 16초
+\`\`\`
+
+**TO_YMINTERVAL / TO_DSINTERVAL — 함수 변환**
+\`\`\`sql
+-- 1년 2개월 후
+SELECT hire_date + TO_YMINTERVAL('01-02') FROM employees WHERE employee_id = 100;
+
+-- 100일 10시간 후
+SELECT hire_date + TO_DSINTERVAL('100 10:00:00') FROM employees WHERE employee_id = 100;
+\`\`\`
+
+**주의: 윤년 차이**
+\`\`\`
+TO_YMINTERVAL('01-00') → 달력 기준 1년 후 (2024-01-01 → 2025-01-01)
+TO_DSINTERVAL('365 00:00:00') → 정확히 365일 후 (2024 윤년: → 2024-12-31)
+\`\`\`` },
+
+  { title: '5. 날짜/시간 함수와 DST', content: `시간대 관련 주요 함수와 일광 절약 시간 처리 방법입니다.
+
+**EXTRACT — 날짜/시간 컴포넌트 추출**
+\`\`\`sql
+-- 2007년 이후 입사 직원
+SELECT last_name, hire_date
+FROM   employees
+WHERE  EXTRACT(YEAR FROM hire_date) > 2007;
+
+-- 분기 계산 (QUARTER는 지원 안 됨 → CEIL 사용)
+SELECT last_name,
+       CEIL(EXTRACT(MONTH FROM hire_date) / 3) AS quarter
+FROM   employees WHERE department_id = 90;
+-- CEIL(1/3)=1(1분기), CEIL(4/3)=2(2분기), CEIL(7/3)=3(3분기), CEIL(10/3)=4(4분기)
+\`\`\`
+
+**TZ_OFFSET — 시간대 오프셋 조회**
+\`\`\`sql
+SELECT TZ_OFFSET('US/Eastern'),    -- -05:00
+       TZ_OFFSET('Asia/Seoul'),     -- +09:00
+       TZ_OFFSET('Europe/London')   -- +00:00
+FROM   DUAL;
+\`\`\`
+
+**FROM_TZ — TIMESTAMP → TIMESTAMP WITH TIME ZONE**
+\`\`\`sql
+SELECT FROM_TZ(TIMESTAMP '2000-07-12 08:00:00', 'Australia/North')
+FROM   DUAL;
+-- 결과: 2000-07-12 08:00:00.000000000 AUSTRALIA/NORTH
+\`\`\`
+
+**TO_TIMESTAMP — 문자열 → TIMESTAMP**
+\`\`\`sql
+SELECT TO_TIMESTAMP('2016-03-06 11:00:00', 'YYYY-MM-DD HH24:MI:SS')
+FROM   DUAL;
+-- 결과: 06-MAR-16 11.00.00.000000000 AM
+\`\`\`
+
+**일광 절약 시간 (DST)**
+| 이벤트 | 동작 | 영향 |
+|--------|------|------|
+| DST 시작 | 01:59:59 → 03:00:00 앞으로 이동 | 02:00~02:59 구간 **무효** |
+| DST 종료 | 02:00:00 → 01:00:01 뒤로 이동 | 01:00:01~02:00:00 구간 **중복** |
+
+\`\`\`sql
+-- DST 전환 구간 오류 예시
+SELECT FROM_TZ(TIMESTAMP '2024-03-10 02:30:00', 'America/New_York')
+FROM DUAL;
+-- ORA-01878: 02:30 구간은 DST로 존재하지 않음
+\`\`\`` },
+]
+
 const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch01: CH01_SECTIONS,
   ch02: CH02_SECTIONS,
@@ -4633,6 +4821,7 @@ const CONTENT_MAP: Record<string, typeof CH24_SECTIONS> = {
   ch17: CH17_SECTIONS,
   ch18: CH18_SECTIONS,
   ch19: CH19_SECTIONS,
+  ch20: CH20_SECTIONS,
   ch22: CH22_SECTIONS,
   ch23: CH23_SECTIONS,
   ch24: CH24_SECTIONS,

@@ -18,6 +18,7 @@ import { ch16Practice } from './ch16'
 import { ch17Practice } from './ch17'
 import { ch18Practice } from './ch18'
 import { ch19Practice } from './ch19_new'
+import { ch20Practice } from './ch20_new'
 import { ch22Practice } from './ch22'
 import { ch23Practice } from './ch23'
 import { ch24Practice } from './ch24'
@@ -42,6 +43,7 @@ const PRACTICE_MAP: Record<string, PracticeProblem[]> = {
   ch17: ch17Practice,
   ch18: ch18Practice,
   ch19: ch19Practice,
+  ch20: ch20Practice,
   ch22: ch22Practice,
   ch23: ch23Practice,
   ch24: ch24Practice,
