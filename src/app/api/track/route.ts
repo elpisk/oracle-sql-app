@@ -31,25 +31,33 @@ const FIELDS: Record<string, (d: Record<string, unknown>) => Record<string, unkn
 
 export async function POST(req: NextRequest) {
   if (!TOKEN || !BASE_ID) {
-    return NextResponse.json({ ok: false, reason: 'Airtable env not set' }, { status: 200 })
+    return NextResponse.json({ ok: false, reason: 'Airtable env not set' })
   }
 
   try {
-    const data = await req.json()
+    const data   = await req.json()
     const table  = TABLE[data.type as string]
     const fields = FIELDS[data.type as string]
-    if (!table || !fields) return NextResponse.json({ ok: true })
+    if (!table || !fields) return NextResponse.json({ ok: false, reason: 'unknown type' })
 
-    await fetch(`https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(table)}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ records: [{ fields: fields(data) }] }),
-    })
-  } catch {
-    // silent fail
+    const res = await fetch(
+      `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(table)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ records: [{ fields: fields(data) }] }),
+      }
+    )
+
+    if (!res.ok) {
+      const err = await res.json()
+      return NextResponse.json({ ok: false, status: res.status, airtableError: err })
+    }
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) })
   }
 
   return NextResponse.json({ ok: true })
