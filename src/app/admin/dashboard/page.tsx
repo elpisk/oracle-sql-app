@@ -24,11 +24,18 @@ const TYPE_LABELS: Record<InquiryType, string> = {
   lecture: '강의 내용', quiz_error: '퀴즈 오류', other: '기타',
 }
 
-interface AirtableRow { [key: string]: string | number | undefined }
+interface TrackRow {
+  type?: string
+  name?: string; email?: string; cohort?: string
+  chapterId?: string; chapterTitle?: string; completedAt?: string
+  score?: number; total?: number; percent?: number
+  completed?: number; practiceTotal?: number
+  [key: string]: string | number | undefined
+}
 interface StudentData {
-  quizzes:   AirtableRow[]
-  lectures:  AirtableRow[]
-  practices: AirtableRow[]
+  quizzes:   TrackRow[]
+  lectures:  TrackRow[]
+  practices: TrackRow[]
 }
 
 export default function AdminDashboard() {
@@ -90,33 +97,33 @@ export default function AdminDashboard() {
 
   const handleLogout = () => { setAdminAuth(false); router.replace('/') }
 
-  // ── Airtable 집계 ──
+  // ── KV 집계 ──
   const quizRows     = students?.quizzes   ?? []
   const lectureRows  = students?.lectures  ?? []
   const practiceRows = students?.practices ?? []
 
   // 유니크 학습자 (이메일 기준)
   const allRows = [...quizRows, ...lectureRows, ...practiceRows]
-  const emailSet = Array.from(new Set(allRows.map(r => String(r['이메일'] ?? '')).filter(Boolean)))
+  const emailSet = Array.from(new Set(allRows.map(r => r.email ?? '').filter(Boolean)))
 
   const totalStudents = emailSet.length
   const avgScore = quizRows.length
-    ? Math.round(quizRows.reduce((s, r) => s + Number(r['정답률'] ?? 0), 0) / quizRows.length)
+    ? Math.round(quizRows.reduce((s, r) => s + Number(r.percent ?? 0), 0) / quizRows.length)
     : 0
 
   // 학습자별 요약
   const studentSummary = emailSet.map(email => {
-    const myQuizzes   = quizRows.filter(r => r['이메일'] === email)
-    const myLectures  = lectureRows.filter(r => r['이메일'] === email)
-    const myPractices = practiceRows.filter(r => r['이메일'] === email)
-    const name    = String(myQuizzes[0]?.['이름'] ?? myLectures[0]?.['이름'] ?? myPractices[0]?.['이름'] ?? '—')
-    const cohort  = String(myQuizzes[0]?.['기수'] ?? myLectures[0]?.['기수'] ?? '—')
-    const bestScores = myQuizzes.map(r => Number(r['정답률'] ?? 0))
+    const myQuizzes   = quizRows.filter(r => r.email === email)
+    const myLectures  = lectureRows.filter(r => r.email === email)
+    const myPractices = practiceRows.filter(r => r.email === email)
+    const name    = myQuizzes[0]?.name ?? myLectures[0]?.name ?? myPractices[0]?.name ?? '—'
+    const cohort  = myQuizzes[0]?.cohort ?? myLectures[0]?.cohort ?? '—'
+    const bestScores = myQuizzes.map(r => Number(r.percent ?? 0))
     const avgPct  = bestScores.length ? Math.round(bestScores.reduce((a,b)=>a+b,0)/bestScores.length) : null
     const lastAll = [...myQuizzes, ...myLectures, ...myPractices]
-      .map(r => String(r['완료일시'] ?? '')).filter(Boolean).sort().reverse()
+      .map(r => r.completedAt ?? '').filter(Boolean).sort().reverse()
     return {
-      email, name, cohort,
+      email, name: String(name), cohort: String(cohort),
       quizCount:    myQuizzes.length,
       lectureCount: myLectures.length,
       practiceCount: myPractices.length,
@@ -214,7 +221,7 @@ export default function AdminDashboard() {
             {atError && (
               <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-apple px-4 py-3 text-[13px] text-red-600">
                 <AlertCircle size={15} />
-                Airtable 연결 실패 — Vercel 환경변수(AIRTABLE_TOKEN, AIRTABLE_BASE_ID)를 확인하세요.
+                KV 연결 실패 — Vercel KV Storage가 프로젝트에 연결됐는지 확인하세요.
               </div>
             )}
 
@@ -266,15 +273,15 @@ export default function AdminDashboard() {
                             <p className="text-[12px] font-bold text-apple-text mb-2">퀴즈 응시 이력</p>
                             <div className="space-y-1.5">
                               {s.myQuizzes.map((q, i) => {
-                                const pct = Number(q['정답률'] ?? 0)
+                                const pct = Number(q.percent ?? 0)
                                 return (
                                   <div key={i} className="flex items-center gap-3 text-[12px]">
-                                    <span className="text-apple-secondary w-16">{String(q['챕터'] ?? '')}</span>
-                                    <span className="text-apple-text flex-1">{String(q['챕터명'] ?? '')}</span>
+                                    <span className="text-apple-secondary w-16">{q.chapterId ?? ''}</span>
+                                    <span className="text-apple-text flex-1">{q.chapterTitle ?? ''}</span>
                                     <span className="font-semibold" style={{ color: pct >= 80 ? '#34C759' : pct >= 60 ? '#FF9500' : '#FF3B30' }}>
-                                      {String(q['점수'] ?? '')}/{String(q['문제수'] ?? '')} ({pct}점)
+                                      {q.score ?? ''}/{q.total ?? ''} ({pct}점)
                                     </span>
-                                    <span className="text-apple-tertiary">{String(q['완료일시'] ?? '').slice(0, 16).replace('T', ' ')}</span>
+                                    <span className="text-apple-tertiary">{(q.completedAt ?? '').slice(0, 16).replace('T', ' ')}</span>
                                   </div>
                                 )
                               })}
@@ -288,10 +295,10 @@ export default function AdminDashboard() {
                             <div className="space-y-1.5">
                               {s.myLectures.map((l, i) => (
                                 <div key={i} className="flex items-center gap-3 text-[12px]">
-                                  <span className="text-apple-secondary w-16">{String(l['챕터'] ?? '')}</span>
-                                  <span className="text-apple-text flex-1">{String(l['챕터명'] ?? '')}</span>
+                                  <span className="text-apple-secondary w-16">{l.chapterId ?? ''}</span>
+                                  <span className="text-apple-text flex-1">{l.chapterTitle ?? ''}</span>
                                   <CheckCircle2 size={13} className="text-apple-green" />
-                                  <span className="text-apple-tertiary">{String(l['완료일시'] ?? '').slice(0, 16).replace('T', ' ')}</span>
+                                  <span className="text-apple-tertiary">{(l.completedAt ?? '').slice(0, 16).replace('T', ' ')}</span>
                                 </div>
                               ))}
                             </div>
