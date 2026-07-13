@@ -339,8 +339,9 @@ export default function AdminDashboard() {
                                       </div>
                                     )}
                                     {isOpen && wrongs.length === 0 && (
-                                      <div className="border-t border-apple-border bg-green-50/30 px-3 py-2 text-[12px] text-apple-green font-semibold">
-                                        ✅ 모두 정답!
+                                      <div className="border-t border-apple-border px-3 py-2 text-[12px] font-semibold"
+                                        style={{ background: q.wrongAnswers ? '#f0fdf4' : '#fafafa', color: q.wrongAnswers ? '#34C759' : '#8e8e93' }}>
+                                        {q.wrongAnswers ? '✅ 모두 정답!' : '— 오답 데이터 없음 (기능 추가 이전 응시)'}
                                       </div>
                                     )}
                                   </div>
