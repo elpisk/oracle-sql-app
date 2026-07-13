@@ -3,7 +3,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, BookOpen, PenSquare, Code2, ChevronRight, Clock, CheckCircle2 } from 'lucide-react'
 import { getChapter } from '@/data/chapters'
-import { getProgress, getBestScore, markLectureComplete } from '@/lib/store'
+import { getProgress, getBestScore, markLectureComplete, getProfile } from '@/lib/store'
 import { track } from '@/lib/tracker_new'
 import { useEffect, useState } from 'react'
 
@@ -13,10 +13,18 @@ export default function ChapterDetail() {
   const ch      = getChapter(id)
   const [prog, setProg] = useState<import('@/lib/types').ChapterProgress>({ chapterId: id, lectureCompleted: false, practiceCompleted: 0 })
   const [best, setBest] = useState<number | null>(null)
+  const [feedback, setFeedback] = useState<string | null>(null)
 
   useEffect(() => {
     setProg(getProgress(id))
     setBest(getBestScore(id))
+    const profile = getProfile()
+    if (profile?.email) {
+      fetch(`/api/feedback?email=${encodeURIComponent(profile.email)}&chapterId=${id}`)
+        .then(r => r.json())
+        .then(d => { if (d.feedback?.message) setFeedback(d.feedback.message) })
+        .catch(() => {})
+    }
   }, [id])
 
   if (!ch) { router.push('/'); return null }
@@ -72,6 +80,17 @@ export default function ChapterDetail() {
 
       {/* 학습 카드 */}
       <div className="max-w-2xl mx-auto px-6 -mt-8 pb-20 space-y-4 fade-up">
+        {feedback && (
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-apple-blue/20 rounded-apple-lg p-5 shadow-apple">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 rounded-full bg-apple-blue flex items-center justify-center">
+                <span className="text-white text-[11px] font-bold">강</span>
+              </div>
+              <span className="text-[13px] font-bold text-apple-blue">강사 피드백</span>
+            </div>
+            <p className="text-[14px] text-apple-text leading-relaxed whitespace-pre-wrap">{feedback}</p>
+          </div>
+        )}
         {tiles.map(({ icon: Icon, label, desc, color, done, extra, href, action }) => {
           const Inner = (
             <div className="flex items-center gap-4 p-5">
@@ -105,3 +124,4 @@ export default function ChapterDetail() {
     </div>
   )
 }
+

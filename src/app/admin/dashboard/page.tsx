@@ -58,6 +58,9 @@ export default function AdminDashboard() {
   const [atError, setAtError]       = useState(false)
   const [expandedEmail, setExpanded] = useState<string | null>(null)
   const [expandedQuizIdx, setExpandedQuizIdx] = useState<string | null>(null)
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, string>>({})     // key: email:chapterId
+  const [savedFeedback, setSavedFeedback] = useState<Record<string, string>>({}) // 저장된 피드백
+  const [feedbackSaving, setFeedbackSaving] = useState<string | null>(null)
 
   // 문의
   const [inquiries, setInquiries]   = useState<Inquiry[]>([])
@@ -142,6 +145,37 @@ export default function AdminDashboard() {
       myQuizzes, myLectures,
     }
   }).sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''))
+
+  // ── 피드백 ──
+  const loadFeedback = async (email: string, chapterId: string) => {
+    const key = `${email}:${chapterId}`
+    if (savedFeedback[key] !== undefined) return
+    try {
+      const res = await fetch(`/api/feedback?email=${encodeURIComponent(email)}&chapterId=${chapterId}`)
+      const data = await res.json()
+      if (data.feedback?.message) {
+        setSavedFeedback(m => ({ ...m, [key]: data.feedback.message }))
+        setFeedbackMap(m => ({ ...m, [key]: data.feedback.message }))
+      } else {
+        setSavedFeedback(m => ({ ...m, [key]: '' }))
+      }
+    } catch { setSavedFeedback(m => ({ ...m, [key]: '' })) }
+  }
+
+  const saveFeedback = async (email: string, chapterId: string) => {
+    const key = `${email}:${chapterId}`
+    const message = feedbackMap[key]?.trim()
+    if (!message) return
+    setFeedbackSaving(key)
+    try {
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, chapterId, message }),
+      })
+      setSavedFeedback(m => ({ ...m, [key]: message }))
+    } finally { setFeedbackSaving(null) }
+  }
 
   // ── 문의 답변 ──
   const handleAnswer = (id: string) => {
@@ -295,7 +329,11 @@ export default function AdminDashboard() {
                                   <div key={i} className="border border-apple-border rounded-apple overflow-hidden">
                                     {/* 요약 행 */}
                                     <button
-                                      onClick={() => setExpandedQuizIdx(isOpen ? null : quizKey)}
+                                      onClick={() => {
+                                        const next = isOpen ? null : quizKey
+                                        setExpandedQuizIdx(next)
+                                        if (next && q.chapterId) loadFeedback(s.email, q.chapterId)
+                                      }}
                                       className="w-full flex items-center gap-3 text-[12px] px-3 py-2 hover:bg-apple-gray-bg/50 transition-colors text-left">
                                       <span className="text-apple-secondary w-14 flex-shrink-0">{q.chapterId ?? ''}</span>
                                       <span className="text-apple-text flex-1">{q.chapterTitle ?? ''}</span>
@@ -344,6 +382,39 @@ export default function AdminDashboard() {
                                         {q.wrongAnswers ? '✅ 모두 정답!' : '— 오답 데이터 없음 (기능 추가 이전 응시)'}
                                       </div>
                                     )}
+
+                                    {/* 피드백 작성 */}
+                                    {isOpen && q.chapterId && (() => {
+                                      const fbKey = `${s.email}:${q.chapterId}`
+                                      const isSaving = feedbackSaving === fbKey
+                                      const saved = savedFeedback[fbKey]
+                                      return (
+                                        <div className="border-t border-apple-border bg-blue-50/30 px-3 py-3 space-y-2">
+                                          <p className="text-[11px] font-bold text-apple-blue">강사 피드백</p>
+                                          {saved && (
+                                            <div className="bg-white border border-apple-blue/20 rounded-apple px-3 py-2 text-[12px] text-apple-text">
+                                              <span className="text-[10px] text-apple-secondary block mb-1">저장된 피드백</span>
+                                              {saved}
+                                            </div>
+                                          )}
+                                          <div className="flex gap-2">
+                                            <textarea
+                                              rows={3}
+                                              value={feedbackMap[fbKey] ?? ''}
+                                              onChange={e => setFeedbackMap(m => ({ ...m, [fbKey]: e.target.value }))}
+                                              placeholder={saved ? '피드백 수정...' : `${s.name} 학습자에게 피드백을 작성하세요...`}
+                                              className="flex-1 rounded-apple border border-apple-border px-3 py-2 text-[12px] resize-none focus:outline-none focus:border-apple-blue transition-colors placeholder:text-apple-tertiary"
+                                            />
+                                            <button
+                                              onClick={() => saveFeedback(s.email, q.chapterId!)}
+                                              disabled={!feedbackMap[fbKey]?.trim() || isSaving}
+                                              className="px-3 py-2 rounded-apple bg-apple-blue text-white text-[12px] font-semibold hover:bg-apple-blue-dark disabled:opacity-40 flex items-center gap-1 flex-shrink-0 self-end transition-colors">
+                                              <Send size={12} />{isSaving ? '저장 중' : saved ? '수정' : '전송'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )
+                                    })()}
                                   </div>
                                 )
                               })}
