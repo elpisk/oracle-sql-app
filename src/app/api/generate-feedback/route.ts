@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,13 +37,10 @@ ${wrongList}
 - 200자 내외의 간결한 한국어로 작성
 - 강사가 직접 쓴 것처럼 자연스럽게 (AI가 생성했다는 언급 없이)`
 
-    const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
-      messages: [{ role: 'user', content: prompt }],
-    })
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+    const result = await model.generateContent(prompt)
+    const text = result.response.text()
 
-    const text = message.content[0].type === 'text' ? message.content[0].text : ''
     return NextResponse.json({ ok: true, feedback: text })
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) })
