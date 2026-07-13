@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import Groq from 'groq-sdk'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,10 +37,13 @@ ${wrongList}
 - 200자 내외의 간결한 한국어로 작성
 - 강사가 직접 쓴 것처럼 자연스럽게 (AI가 생성했다는 언급 없이)`
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-    const result = await model.generateContent(prompt)
-    const text = result.response.text()
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 400,
+    })
 
+    const text = completion.choices[0]?.message?.content ?? ''
     return NextResponse.json({ ok: true, feedback: text })
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) })
