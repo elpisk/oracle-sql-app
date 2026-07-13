@@ -1,8 +1,17 @@
 import { getProfile } from './store'
 import { getChapter } from '@/data/chapters'
 
+export interface WrongAnswer {
+  questionId: number
+  level: 'basic' | 'intermediate' | 'advanced'
+  question: string
+  selectedOption: string
+  correctOption: string
+  explanation: string
+}
+
 export type TrackEvent =
-  | { type: 'quiz';     chapterId: string; score: number; total: number }
+  | { type: 'quiz';     chapterId: string; score: number; total: number; wrongAnswers?: WrongAnswer[] }
   | { type: 'lecture';  chapterId: string }
   | { type: 'practice'; chapterId: string; completed: number; practiceTotal: number }
 

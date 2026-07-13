@@ -24,13 +24,22 @@ const TYPE_LABELS: Record<InquiryType, string> = {
   lecture: '강의 내용', quiz_error: '퀴즈 오류', other: '기타',
 }
 
+interface WrongAnswer {
+  questionId: number
+  level: 'basic' | 'intermediate' | 'advanced'
+  question: string
+  selectedOption: string
+  correctOption: string
+  explanation: string
+}
 interface TrackRow {
   type?: string
   name?: string; email?: string; cohort?: string
   chapterId?: string; chapterTitle?: string; completedAt?: string
   score?: number; total?: number; percent?: number
   completed?: number; practiceTotal?: number
-  [key: string]: string | number | undefined
+  wrongAnswers?: WrongAnswer[]
+  [key: string]: unknown
 }
 interface StudentData {
   quizzes:   TrackRow[]
@@ -43,11 +52,12 @@ export default function AdminDashboard() {
   const [tab, setTab]         = useState<Tab>('stats')
   const [mounted, setMounted] = useState(false)
 
-  // Airtable 학습 데이터
+  // KV 학습 데이터
   const [students, setStudents]     = useState<StudentData | null>(null)
   const [loadingAT, setLoadingAT]   = useState(false)
   const [atError, setAtError]       = useState(false)
   const [expandedEmail, setExpanded] = useState<string | null>(null)
+  const [expandedQuizIdx, setExpandedQuizIdx] = useState<string | null>(null)
 
   // 문의
   const [inquiries, setInquiries]   = useState<Inquiry[]>([])
@@ -267,21 +277,72 @@ export default function AdminDashboard() {
                     {/* 펼치면 상세 */}
                     {expandedEmail === s.email && (
                       <div className="border-t border-apple-border px-5 py-4 space-y-4 bg-apple-gray-bg/30">
-                        {/* 퀴즈 이력 */}
+                        {/* 퀴즈 이력 + 오답 분석 */}
                         {s.myQuizzes.length > 0 && (
                           <div>
                             <p className="text-[12px] font-bold text-apple-text mb-2">퀴즈 응시 이력</p>
-                            <div className="space-y-1.5">
+                            <div className="space-y-2">
                               {s.myQuizzes.map((q, i) => {
-                                const pct = Number(q.percent ?? 0)
+                                const pct      = Number(q.percent ?? 0)
+                                const quizKey  = `${s.email}-${i}`
+                                const isOpen   = expandedQuizIdx === quizKey
+                                const wrongs   = (q.wrongAnswers ?? []) as WrongAnswer[]
+                                const levelLabel = (lv: string) =>
+                                  lv === 'basic' ? '하' : lv === 'intermediate' ? '중' : '상'
+                                const levelColor = (lv: string) =>
+                                  lv === 'basic' ? '#34C759' : lv === 'intermediate' ? '#FF9500' : '#FF3B30'
                                 return (
-                                  <div key={i} className="flex items-center gap-3 text-[12px]">
-                                    <span className="text-apple-secondary w-16">{q.chapterId ?? ''}</span>
-                                    <span className="text-apple-text flex-1">{q.chapterTitle ?? ''}</span>
-                                    <span className="font-semibold" style={{ color: pct >= 80 ? '#34C759' : pct >= 60 ? '#FF9500' : '#FF3B30' }}>
-                                      {q.score ?? ''}/{q.total ?? ''} ({pct}점)
-                                    </span>
-                                    <span className="text-apple-tertiary">{(q.completedAt ?? '').slice(0, 16).replace('T', ' ')}</span>
+                                  <div key={i} className="border border-apple-border rounded-apple overflow-hidden">
+                                    {/* 요약 행 */}
+                                    <button
+                                      onClick={() => setExpandedQuizIdx(isOpen ? null : quizKey)}
+                                      className="w-full flex items-center gap-3 text-[12px] px-3 py-2 hover:bg-apple-gray-bg/50 transition-colors text-left">
+                                      <span className="text-apple-secondary w-14 flex-shrink-0">{q.chapterId ?? ''}</span>
+                                      <span className="text-apple-text flex-1">{q.chapterTitle ?? ''}</span>
+                                      <span className="font-semibold flex-shrink-0" style={{ color: pct >= 80 ? '#34C759' : pct >= 60 ? '#FF9500' : '#FF3B30' }}>
+                                        {q.score ?? ''}/{q.total ?? ''} ({pct}점)
+                                      </span>
+                                      {wrongs.length > 0 && (
+                                        <span className="text-[11px] text-apple-orange font-semibold flex-shrink-0">
+                                          오답 {wrongs.length}개
+                                        </span>
+                                      )}
+                                      <span className="text-apple-tertiary flex-shrink-0">{(q.completedAt ?? '').slice(0, 16).replace('T', ' ')}</span>
+                                    </button>
+
+                                    {/* 오답 상세 */}
+                                    {isOpen && wrongs.length > 0 && (
+                                      <div className="border-t border-apple-border bg-red-50/30 px-3 py-3 space-y-3">
+                                        <p className="text-[11px] font-bold text-apple-orange">오답 분석</p>
+                                        {wrongs.map((w, wi) => (
+                                          <div key={wi} className="bg-white rounded-apple p-3 space-y-1.5 border border-red-100">
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                                                style={{ background: levelColor(w.level) + '20', color: levelColor(w.level) }}>
+                                                난이도 {levelLabel(w.level)}
+                                              </span>
+                                            </div>
+                                            <p className="text-[12px] font-semibold text-apple-text leading-relaxed">{w.question}</p>
+                                            <div className="flex items-start gap-2 text-[12px]">
+                                              <span className="text-apple-red font-semibold flex-shrink-0">선택:</span>
+                                              <span className="text-apple-red">{w.selectedOption}</span>
+                                            </div>
+                                            <div className="flex items-start gap-2 text-[12px]">
+                                              <span className="text-apple-green font-semibold flex-shrink-0">정답:</span>
+                                              <span className="text-apple-green">{w.correctOption}</span>
+                                            </div>
+                                            <div className="bg-blue-50 rounded px-2 py-1.5 text-[11px] text-apple-text leading-relaxed">
+                                              💡 {w.explanation}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {isOpen && wrongs.length === 0 && (
+                                      <div className="border-t border-apple-border bg-green-50/30 px-3 py-2 text-[12px] text-apple-green font-semibold">
+                                        ✅ 모두 정답!
+                                      </div>
+                                    )}
                                   </div>
                                 )
                               })}

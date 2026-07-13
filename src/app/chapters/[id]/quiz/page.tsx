@@ -5,7 +5,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, XCircle } from 'lucide-react'
 import { getChapter } from '@/data/chapters'
 import { getQuiz } from '@/data/quiz'
 import { saveQuizAttempt } from '@/lib/store'
-import { track } from '@/lib/tracker_new'
+import { track, type WrongAnswer } from '@/lib/tracker_new'
 import Badge from '@/components/Badge'
 import type { QuizQuestion, QuizAttempt } from '@/lib/types'
 
@@ -49,8 +49,9 @@ export default function QuizPage() {
 
   const handleNext = () => {
     if (isLast) {
-      const correctCount = Object.values({ ...answers, [q.id]: { selected: selected ?? -1, correct: selected === q.correctAnswer } }).filter(a => a.correct).length
-      const finalAnswers = Object.entries({ ...answers, [q.id]: { selected: selected ?? -1, correct: selected === q.correctAnswer } }).map(([qid, a]) => ({
+      const allFinalAnswers = { ...answers, [q.id]: { selected: selected ?? -1, correct: selected === q.correctAnswer } }
+      const correctCount = Object.values(allFinalAnswers).filter(a => a.correct).length
+      const finalAnswers = Object.entries(allFinalAnswers).map(([qid, a]) => ({
         questionId: Number(qid), selected: a.selected, correct: a.correct,
       }))
       const attempt: QuizAttempt = {
@@ -61,7 +62,25 @@ export default function QuizPage() {
         completedAt: new Date().toISOString(),
       }
       saveQuizAttempt(attempt)
-      track({ type: 'quiz', chapterId: id, score: correctCount, total })
+
+      const wrongAnswers: WrongAnswer[] = questions
+        .filter(question => {
+          const ans = allFinalAnswers[question.id]
+          return ans && !ans.correct
+        })
+        .map(question => {
+          const ans = allFinalAnswers[question.id]
+          return {
+            questionId: question.id,
+            level: question.level,
+            question: question.question,
+            selectedOption: question.options[ans.selected] ?? '(선택 없음)',
+            correctOption: question.options[question.correctAnswer],
+            explanation: question.explanation,
+          }
+        })
+
+      track({ type: 'quiz', chapterId: id, score: correctCount, total, wrongAnswers })
       router.push(`/chapters/${id}/quiz/result?score=${correctCount}&total=${total}`)
     } else {
       const next = current + 1
