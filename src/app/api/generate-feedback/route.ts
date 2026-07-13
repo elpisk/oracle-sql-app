@@ -37,7 +37,7 @@ ${wrongList}
 - 200자 내외의 간결한 한국어로 작성
 - 강사가 직접 쓴 것처럼 자연스럽게 (AI가 생성했다는 언급 없이)`
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
     const result = await model.generateContent(prompt)
     const text = result.response.text()
 
