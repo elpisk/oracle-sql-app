@@ -61,6 +61,7 @@ export default function AdminDashboard() {
   const [feedbackMap, setFeedbackMap] = useState<Record<string, string>>({})     // key: email:chapterId
   const [savedFeedback, setSavedFeedback] = useState<Record<string, string>>({}) // 저장된 피드백
   const [feedbackSaving, setFeedbackSaving] = useState<string | null>(null)
+  const [feedbackGenerating, setFeedbackGenerating] = useState<string | null>(null) // AI 생성 중
 
   // 문의
   const [inquiries, setInquiries]   = useState<Inquiry[]>([])
@@ -147,19 +148,50 @@ export default function AdminDashboard() {
   }).sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''))
 
   // ── 피드백 ──
-  const loadFeedback = async (email: string, chapterId: string) => {
+  const loadFeedback = async (
+    email: string, chapterId: string,
+    quizRow?: TrackRow
+  ) => {
     const key = `${email}:${chapterId}`
     if (savedFeedback[key] !== undefined) return
+
+    // 저장된 피드백 로드
     try {
       const res = await fetch(`/api/feedback?email=${encodeURIComponent(email)}&chapterId=${chapterId}`)
       const data = await res.json()
       if (data.feedback?.message) {
         setSavedFeedback(m => ({ ...m, [key]: data.feedback.message }))
         setFeedbackMap(m => ({ ...m, [key]: data.feedback.message }))
+        return // 이미 저장된 피드백이 있으면 AI 생성 생략
       } else {
         setSavedFeedback(m => ({ ...m, [key]: '' }))
       }
     } catch { setSavedFeedback(m => ({ ...m, [key]: '' })) }
+
+    // 저장된 피드백 없고, 오답이 있으면 AI 초안 생성
+    const wrongs = quizRow?.wrongAnswers as unknown[]
+    if (!wrongs?.length) return
+
+    setFeedbackGenerating(key)
+    try {
+      const res = await fetch('/api/generate-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentName:  quizRow?.name ?? email,
+          chapterTitle: quizRow?.chapterTitle ?? chapterId,
+          score:        quizRow?.score ?? 0,
+          total:        quizRow?.total ?? 0,
+          wrongAnswers: wrongs,
+        }),
+      })
+      const data = await res.json()
+      if (data.ok && data.feedback) {
+        setFeedbackMap(m => ({ ...m, [key]: data.feedback }))
+      }
+    } catch { /* silent */ } finally {
+      setFeedbackGenerating(null)
+    }
   }
 
   const saveFeedback = async (email: string, chapterId: string) => {
@@ -332,7 +364,7 @@ export default function AdminDashboard() {
                                       onClick={() => {
                                         const next = isOpen ? null : quizKey
                                         setExpandedQuizIdx(next)
-                                        if (next && q.chapterId) loadFeedback(s.email, q.chapterId)
+                                        if (next && q.chapterId) loadFeedback(s.email, q.chapterId, q)
                                       }}
                                       className="w-full flex items-center gap-3 text-[12px] px-3 py-2 hover:bg-apple-gray-bg/50 transition-colors text-left">
                                       <span className="text-apple-secondary w-14 flex-shrink-0">{q.chapterId ?? ''}</span>
@@ -397,9 +429,15 @@ export default function AdminDashboard() {
                                               {saved}
                                             </div>
                                           )}
+                                          {feedbackGenerating === fbKey ? (
+                                          <div className="flex items-center gap-2 py-3 text-[12px] text-apple-secondary">
+                                            <RefreshCw size={13} className="animate-spin text-apple-blue" />
+                                            AI 피드백 초안 생성 중...
+                                          </div>
+                                        ) : (
                                           <div className="flex gap-2">
                                             <textarea
-                                              rows={3}
+                                              rows={4}
                                               value={feedbackMap[fbKey] ?? ''}
                                               onChange={e => setFeedbackMap(m => ({ ...m, [fbKey]: e.target.value }))}
                                               placeholder={saved ? '피드백 수정...' : `${s.name} 학습자에게 피드백을 작성하세요...`}
@@ -412,6 +450,7 @@ export default function AdminDashboard() {
                                               <Send size={12} />{isSaving ? '저장 중' : saved ? '수정' : '전송'}
                                             </button>
                                           </div>
+                                        )}
                                         </div>
                                       )
                                     })()}
