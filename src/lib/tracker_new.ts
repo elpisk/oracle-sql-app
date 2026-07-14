@@ -33,7 +33,7 @@ export async function track(event: TrackEvent): Promise<void> {
 
   const payload =
     event.type === 'quiz'
-      ? { ...base, score: event.score, total: event.total, percent: Math.round((event.score / event.total) * 100) }
+      ? { ...base, score: event.score, total: event.total, percent: Math.round((event.score / event.total) * 100), wrongAnswers: event.wrongAnswers ?? [] }
     : event.type === 'practice'
       ? { ...base, completed: event.completed, practiceTotal: event.practiceTotal }
       : base
